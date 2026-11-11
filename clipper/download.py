@@ -40,6 +40,9 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
             a = fmt_time(start_s or 0)
             b = fmt_time(end_s) if end_s is not None else "inf"
             cmd += ["--download-sections", f"*{a}-{b}", "--force-keyframes-at-cuts"]
+        # yt-dlp по умолчанию включает только deno; если его нет — подсунуть node
+        if not shutil.which("deno") and shutil.which("node"):
+            cmd += ["--js-runtimes", f"node:{shutil.which('node')}"]
         if cookies:
             cmd += ["--cookies", cookies]
         if not no_chat and "twitch.tv" not in src:
