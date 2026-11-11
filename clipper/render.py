@@ -140,11 +140,24 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     words = []
     if ccfg["subs"].get("enabled", True):
         skip = [(parse_time(x), parse_time(y)) for x, y in clip.get("subs_skip", [])]
+        # близкие сегменты распознаём одним окном с запасом: короткому куску без контекста
+        # модель слышит слова хуже
+        spans = []
+        for g in sorted(segs, key=lambda g: g["a"]):
+            if g["subs"]:
+                if spans and g["a"] - spans[-1][1] < 60:
+                    spans[-1][1] = max(spans[-1][1], g["b"])
+                else:
+                    spans.append([g["a"], g["b"]])
+        span_words = []
+        if fake_words is None:
+            for x, y in spans:
+                span_words += words_in_range(ccfg, pdir, round(max(0.0, x - 5), 1), round(y + 5, 1))
         off = 0.0
         for g in segs:
             a, b, sp = g["a"], g["b"], g["speed"]
             if g["subs"]:
-                raw = fake_words if fake_words is not None else words_in_range(ccfg, pdir, a, b)
+                raw = fake_words if fake_words is not None else span_words
                 for w in raw:
                     mid = (w["start"] + w["end"]) / 2
                     if any(x <= mid < y for x, y in skip):
