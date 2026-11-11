@@ -19,6 +19,11 @@ def _esc(text: str) -> str:
     return text.replace("\\", "\\\\").replace("{", "(").replace("}", ")").replace("\n", " ")
 
 
+def _ml(text: str) -> str:
+    """Многострочный текст: перевод строки -> \\N."""
+    return "\\N".join(_esc(x) for x in str(text).split("\n"))
+
+
 def _clean_word(w: str, scfg: dict) -> str:
     for k, v in (scfg.get("replace") or {}).items():
         if w.strip(".,!?").lower() == str(k).lower():
@@ -48,7 +53,8 @@ def group_words(words: list[dict], max_words: int, max_chars: int) -> list[list[
 
 
 def build_ass(words: list[dict], clip_start: float, clip_end: float, W: int, H: int,
-              scfg: dict, tcfg: dict, title: str | None, subs_y: int, title_y: int) -> str:
+              scfg: dict, tcfg: dict, title: str | None, subs_y: int, title_y: int,
+              labels: list | None = None, label_y: int | None = None) -> str:
     dur = clip_end - clip_start
     lines = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {W}", f"PlayResY: {H}",
@@ -63,6 +69,9 @@ def build_ass(words: list[dict], clip_start: float, clip_end: float, W: int, H: 
         f"Style: Title,{tcfg['font']},{tcfg['size']},{ass_color(tcfg['color'])},&H000000FF,"
         f"{ass_color(tcfg['box_color'])},{ass_color(tcfg['box_color'])},0,0,0,0,100,100,0,0,3,"
         f"14,0,5,80,80,0,1",
+        f"Style: Label,{tcfg['font']},{int(tcfg['size'] * 2)},{ass_color(scfg['highlight'])},&H000000FF,"
+        f"{ass_color('#000000')},{ass_color('#000000', 0x60)},0,0,0,0,100,100,0,0,1,"
+        f"8,3,5,60,60,0,1",
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
@@ -70,9 +79,14 @@ def build_ass(words: list[dict], clip_start: float, clip_end: float, W: int, H: 
     if title and tcfg.get("enabled", True):
         t = title.upper() if tcfg.get("uppercase") else title
         t_end = dur if not tcfg.get("duration") else min(dur, float(tcfg["duration"]))
-        anim = r"\fad(150,250)\t(0,180,\fscx108\fscy108)\t(180,320,\fscx100\fscy100)"
+        anim = r"\t(0,180,\fscx108\fscy108)\t(180,320,\fscx100\fscy100)"
         lines.append(f"Dialogue: 1,{_ts(0)},{_ts(t_end)},Title,,0,0,0,,"
-                     f"{{\\an5\\pos({W // 2},{title_y}){anim}}}{_esc(t)}")
+                     f"{{\\an5\\pos({W // 2},{title_y}){anim}}}{_ml(t)}")
+    for (a, b, text) in labels or []:
+        t = text.upper() if tcfg.get("uppercase") else text
+        anim = r"\fad(80,120)\t(0,150,\fscx110\fscy110)\t(150,280,\fscx100\fscy100)"
+        lines.append(f"Dialogue: 2,{_ts(a)},{_ts(b)},Label,,0,0,0,,"
+                     f"{{\\an5\\pos({W // 2},{label_y}){anim}}}{_ml(t)}")
 
     if scfg.get("enabled", True) and words:
         prepared = []

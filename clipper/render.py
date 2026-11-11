@@ -64,15 +64,45 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int) -> st
     die(f"неизвестная раскладка {name!r} (есть: stream, blur, crop)")
 
 
-def clip_segments(clip: dict) -> list[tuple[float, float]]:
-    if "segments" in clip:
-        segs = [(parse_time(a), parse_time(b)) for a, b in clip["segments"]]
-    else:
-        segs = [(parse_time(clip["start"]), parse_time(clip["end"]))]
-    for a, b in segs:
+def clip_segments(clip: dict) -> list[dict]:
+    """Сегменты клипа. Элемент — [начало, конец] или словарь
+    {start, end, speed, zoom, focus: [x, y], subs, text}."""
+    raw = clip["segments"] if "segments" in clip else [[clip["start"], clip["end"]]]
+    segs = []
+    for r in raw:
+        if isinstance(r, dict):
+            d = dict(r)
+            a, b = parse_time(d.pop("start")), parse_time(d.pop("end"))
+        else:
+            a, b, d = parse_time(r[0]), parse_time(r[1]), {}
         if b <= a:
             die(f"клип {clip.get('id')}: конец {fmt_time(b)} раньше начала {fmt_time(a)}")
+        speed = float(d.get("speed", 1.0))
+        if not 0.25 <= speed <= 4:
+            die(f"клип {clip.get('id')}: speed должен быть 0.25..4")
+        segs.append({
+            "a": a, "b": b, "speed": speed,
+            "zoom": float(d.get("zoom", 1.0)),
+            "focus": d.get("focus", [0.5, 0.5]),
+            # в ускоренных/замедленных кусках субтитры по умолчанию выключены
+            "subs": d.get("subs", speed == 1.0),
+            "text": d.get("text"),
+            "out": (b - a) / speed,
+        })
     return segs
+
+
+def _atempo(speed: float) -> str:
+    """atempo принимает 0.5..2 — раскладываем на цепочку."""
+    parts = []
+    while speed < 0.5:
+        parts.append("atempo=0.5")
+        speed /= 0.5
+    while speed > 2.0:
+        parts.append("atempo=2.0")
+        speed /= 2.0
+    parts.append(f"atempo={speed:.4f}")
+    return ",".join(parts)
 
 
 def load_plan(pdir: Path, plan: str | None) -> dict:
@@ -89,7 +119,10 @@ def safe_id(s: str) -> str:
 
 def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: bool = False,
                 fake_words: list | None = None) -> Path:
-    ccfg = deep_merge(cfg, {k: clip[k] for k in ("output", "layouts", "subs", "title", "whisper") if isinstance(clip.get(k), dict)})
+    over = {k: clip[k] for k in ("output", "layouts", "subs", "whisper") if isinstance(clip.get(k), dict)}
+    if isinstance(clip.get("title_style"), dict):  # title — текст заголовка, title_style — его настройки
+        over["title"] = clip["title_style"]
+    ccfg = deep_merge(cfg, over)
     if clip.get("subs") is False:
         ccfg["subs"]["enabled"] = False
     o = ccfg["output"]
@@ -101,25 +134,33 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     lcfg = ccfg["layouts"][layout]
 
     segs = clip_segments(clip)
-    s0 = min(a for a, _ in segs)
-    s1 = max(b for _, b in segs)
-    total = sum(b - a for a, b in segs)
+    total = sum(g["out"] for g in segs)
 
     # слова с пересчётом времени в таймлайн клипа
     words = []
     if ccfg["subs"].get("enabled", True):
         skip = [(parse_time(x), parse_time(y)) for x, y in clip.get("subs_skip", [])]
         off = 0.0
-        for a, b in segs:
-            raw = fake_words if fake_words is not None else words_in_range(ccfg, pdir, a, b)
-            for w in raw:
-                mid = (w["start"] + w["end"]) / 2
-                if any(x <= mid < y for x, y in skip):
-                    continue
-                if a <= mid < b:
-                    words.append({**w, "start": off + max(0.0, w["start"] - a), "end": off + min(b, w["end"]) - a})
-            off += b - a
+        for g in segs:
+            a, b, sp = g["a"], g["b"], g["speed"]
+            if g["subs"]:
+                raw = fake_words if fake_words is not None else words_in_range(ccfg, pdir, a, b)
+                for w in raw:
+                    mid = (w["start"] + w["end"]) / 2
+                    if any(x <= mid < y for x, y in skip):
+                        continue
+                    if a <= mid < b:
+                        words.append({**w, "start": off + max(0.0, w["start"] - a) / sp,
+                                      "end": off + (min(b, w["end"]) - a) / sp})
+            off += g["out"]
         words.sort(key=lambda w: w["start"])
+
+    # надписи на отдельных сегментах
+    labels, off = [], 0.0
+    for g in segs:
+        if g["text"]:
+            labels.append((off, off + g["out"], g["text"]))
+        off += g["out"]
 
     top = _even(lcfg.get("top_height", 0)) if layout == "stream" else 0
     subs_y = ccfg["subs"].get("y") or (top + 230 if layout == "stream" else int(H * 0.72))
@@ -129,24 +170,44 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     out_dir.mkdir(parents=True, exist_ok=True)
     ass_name = f"{cid}.ass"
     (out_dir / ass_name).write_text(
-        build_ass(words, 0.0, total, W, H, ccfg["subs"], ccfg["title"], clip.get("title"), subs_y, title_y),
+        build_ass(words, 0.0, total, W, H, ccfg["subs"], ccfg["title"], clip.get("title"), subs_y, title_y,
+                  labels=labels, label_y=ccfg["title"].get("label_y") or int(H * 0.5)),
         encoding="utf-8")
 
     has_a = info["has_audio"] and not preview_png
     # каждый сегмент — отдельный вход с быстрой перемоткой: не держим в памяти видео между кусками
     inputs, parts, concat_in = [], [], []
-    for i, (a, b) in enumerate(segs):
+    for i, g in enumerate(segs):
+        a, b, sp, z = g["a"], g["b"], g["speed"], g["zoom"]
         inputs += ["-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", src.resolve()]
-        parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
+        vf = f"[{i}:v]"
+        if z > 1.0:  # резкий зум на сегмент (jump-zoom), focus — центр в долях кадра
+            fx, fy = g["focus"]
+            cw, ch = _even(sw / z), _even(sh / z)
+            cx = min(max(0, int(fx * sw - cw / 2)), sw - cw)
+            cy = min(max(0, int(fy * sh - ch / 2)), sh - ch)
+            vf += f"crop={cw}:{ch}:{cx}:{cy},scale={sw}:{sh}:flags=lanczos,"
+        vf += f"setpts=(PTS-STARTPTS)/{sp:.4f},fps=60,setsar=1[v{i}]"
+        parts.append(vf)
         concat_in.append(f"[v{i}]")
         if has_a:
-            parts.append(f"[{i}:a]asetpts=PTS-STARTPTS[a{i}]")
+            af = f"[{i}:a]asetpts=PTS-STARTPTS"
+            if sp != 1.0:
+                af += "," + _atempo(sp)
+            parts.append(af + f",aresample=48000[a{i}]")
             concat_in.append(f"[a{i}]")
     parts.append("".join(concat_in) + f"concat=n={len(segs)}:v=1:a={1 if has_a else 0}"
                  + ("[vc][ac]" if has_a else "[vc]"))
     parts.append(layout_filter(layout, lcfg, sw, sh, W, H))
     fonts = str(FONTS_DIR).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
-    parts.append(f"[lay]fps={o['fps']},format=yuv420p,ass={ass_name}:fontsdir='{fonts}'[v]")
+    pb = ccfg["output"].get("progress_bar")
+    vtail = "[vs]" if pb else "[v]"
+    parts.append(f"[lay]fps={o['fps']},format=yuv420p,ass={ass_name}:fontsdir='{fonts}'{vtail}")
+    if pb:  # полоска прогресса внизу
+        ph = int(pb.get("height", 12)) if isinstance(pb, dict) else 12
+        pc = (pb.get("color") if isinstance(pb, dict) else None) or ccfg["subs"]["highlight"]
+        parts.append(f"color=c={pc.replace('#', '0x')}:s={W}x{ph}:r={o['fps']}[pbar]")
+        parts.append(f"[vs][pbar]overlay=x='-w+w*t/{total:.3f}':y={H - ph}:shortest=1,format=yuv420p[v]")
     if has_a:
         parts.append("[ac]" + ("loudnorm=I=-14:TP=-1.5:LRA=11," if o.get("loudnorm") else "")
                      + "aresample=48000[a]")
@@ -182,8 +243,8 @@ def render(cfg: dict, pdir: Path, plan_path: str | None, only: list[str] | None)
     out_dir = pdir / "out"
     for i, c in enumerate(clips, 1):
         segs = clip_segments(c)
-        dur = sum(b - a for a, b in segs)
-        print(f"[{i}/{len(clips)}] {c.get('id')}  {fmt_time(segs[0][0])}  {dur:.1f}s  ({c.get('layout', 'stream')})")
+        dur = sum(g["out"] for g in segs)
+        print(f"[{i}/{len(clips)}] {c.get('id')}  {fmt_time(segs[0]['a'])}  {dur:.1f}s  ({c.get('layout', 'stream')})")
         out = render_clip(pcfg, pdir, c, out_dir)
         print(f"  ✓ {out}")
     print(f"✓ готово: {out_dir}")
