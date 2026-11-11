@@ -2,6 +2,7 @@
 import json
 import re
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -50,7 +51,19 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
         cmd += list(extra or [])
         cmd.append(src)
         print("→ скачиваю:", src)
-        run(cmd)
+        try:
+            run(cmd)
+        except subprocess.CalledProcessError:
+            # YouTube часто режет DASH-поток с серверных IP (403 после ~20–30 МБ),
+            # а HLS (m3u8) с тем же качеством отдаёт. Пробуем его.
+            if "youtu" not in src:
+                raise
+            print("→ DASH-поток оборвался, пробую HLS (m3u8)")
+            for p in pdir.glob("source.f*.part"):
+                p.unlink()
+            hls = (f"b[protocol^=m3u8][height<={max_height}]"
+                   f"/bv*[protocol^=m3u8][height<={max_height}]+ba")
+            run([hls if c == fmt else c for c in cmd])
         info_p = pdir / "source.info.json"
         if info_p.exists():
             info = read_json(info_p)
