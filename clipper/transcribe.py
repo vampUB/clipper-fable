@@ -35,8 +35,15 @@ def _load_model(wcfg: dict):
 
 def _transcribe_file(audio: Path, wcfg: dict, offset: float = 0.0, progress_total: float | None = None):
     model = _load_model(wcfg)
+    # читаем wav сами: так не зависим от версии PyAV, через которую faster-whisper открывает файлы
+    import wave
+
+    import numpy as np
+    with wave.open(str(audio), "rb") as wf:
+        pcm = np.frombuffer(wf.readframes(wf.getnframes()), dtype=np.int16)
+    samples = pcm.astype(np.float32) / 32768.0
     segments, _info = model.transcribe(
-        str(audio), language=wcfg.get("language") or None, word_timestamps=True,
+        samples, language=wcfg.get("language") or None, word_timestamps=True,
         vad_filter=True, beam_size=5 if "large" in model._clipper_name else 1,
         condition_on_previous_text=False,
     )
