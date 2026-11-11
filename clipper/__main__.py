@@ -24,6 +24,8 @@ def main(argv=None):
     t.add_argument("project")
     t.add_argument("--model")
     t.add_argument("--language")
+    t.add_argument("--from", dest="start", help="распознать только окно: начало (быстрый режим)")
+    t.add_argument("--to", dest="end", help="конец окна")
 
     a = sub.add_parser("analyze", help="найти кандидатов в хайлайты")
     a.add_argument("project")
@@ -48,6 +50,8 @@ def main(argv=None):
     r.add_argument("project")
     r.add_argument("--plan", help="путь к плану (по умолчанию work/<проект>/clips.yaml)")
     r.add_argument("--only", nargs="+", help="только эти id")
+    r.add_argument("--fast", action="store_true",
+                   help="быстрый режим: субтитры моделью turbo (если в плане не задана другая), кодирование veryfast")
 
     args = p.parse_args(argv)
     from pathlib import Path
@@ -74,7 +78,9 @@ def main(argv=None):
         if args.language:
             cfg["whisper"]["language"] = args.language
         from .transcribe import transcribe_project
-        transcribe_project(cfg, pdir)
+        from .util import parse_time
+        transcribe_project(cfg, pdir, parse_time(args.start) if args.start else None,
+                           parse_time(args.end) if args.end else None)
     elif args.cmd == "analyze":
         from .analyze import analyze
         analyze(cfg, pdir, args.top)
@@ -88,6 +94,10 @@ def main(argv=None):
         preview(cfg, pdir, args.at, args.layout, args.plan)
     elif args.cmd == "render":
         from .render import render
+        if args.fast:
+            cfg["whisper"]["clip_model"] = cfg["whisper"].get("clip_model") or "turbo"
+            cfg["whisper"]["fast"] = True
+            cfg["output"]["preset"] = "veryfast"
         render(cfg, pdir, args.plan, args.only)
 
 

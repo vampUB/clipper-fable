@@ -74,15 +74,23 @@ def _extract_audio(src: Path, dst: Path, start: float | None = None, end: float 
     run(cmd)
 
 
-def transcribe_project(cfg: dict, pdir: Path):
+def transcribe_project(cfg: dict, pdir: Path, start: float | None = None, end: float | None = None):
+    """Распознать всё видео или только окно [start, end] (секунды исходника) — быстрый режим."""
     src = find_source(pdir)
     meta = read_json(pdir / "meta.json") if (pdir / "meta.json").exists() else {}
+    total = meta.get("duration")
+    a = max(0.0, start or 0.0)
+    b = min(end, total) if (end and total) else (end or total)
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "a.wav"
-        print("→ извлекаю звук")
-        _extract_audio(src, wav)
-        segs = _transcribe_file(wav, cfg["whisper"], progress_total=meta.get("duration"))
-    write_json(pdir / "transcript.json", {"segments": segs})
+        print("→ извлекаю звук" + (f" {fmt_time(a)}–{fmt_time(b)}" if start or end else ""))
+        _extract_audio(src, wav, a if start else None, b if end else None)
+        segs = _transcribe_file(wav, cfg["whisper"], offset=a if start else 0.0,
+                                progress_total=(b - a) if b else None)
+    data = {"segments": segs}
+    if start or end:
+        data["range"] = [round(a, 2), round(b, 2) if b else None]
+    write_json(pdir / "transcript.json", data)
     with open(pdir / "transcript.txt", "w", encoding="utf-8") as f:
         for s in segs:
             f.write(f"[{fmt_time(s['start'])}] {s['text']}\n")
@@ -95,9 +103,13 @@ def words_in_range(cfg: dict, pdir: Path, start: float, end: float) -> list[dict
     clip_model = cfg["whisper"].get("clip_model")
     full = pdir / "transcript.json"
     if full.exists() and not clip_model:
-        segs = read_json(full)["segments"]
-        return [w for s in segs for w in s["words"] if w["end"] > start and w["start"] < end]
+        data = read_json(full)
+        rng = data.get("range")  # транскрипт только окна (быстрый режим) — вне окна распознаём кусок
+        if not rng or (rng[0] <= start and (rng[1] is None or end <= rng[1])):
+            return [w for s in data["segments"] for w in s["words"] if w["end"] > start and w["start"] < end]
     wcfg = dict(cfg["whisper"], model=clip_model) if clip_model else cfg["whisper"]
+    if wcfg.get("model") == "auto":  # имя модели нужно для кэша
+        wcfg = dict(wcfg, model=_load_model(wcfg)._clipper_name)
     cache = pdir / "cache" / f"words_{wcfg['model']}_{start:.2f}_{end:.2f}.json"
     if cache.exists():
         return read_json(cache)

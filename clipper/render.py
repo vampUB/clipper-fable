@@ -258,6 +258,8 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
 def render(cfg: dict, pdir: Path, plan_path: str | None, only: list[str] | None):
     plan = load_plan(pdir, plan_path)
     pcfg = deep_merge(cfg, plan.get("defaults"))
+    if cfg["whisper"].get("fast") and pcfg["whisper"].get("clip_model") == "large-v3":
+        pcfg["whisper"]["clip_model"] = "turbo"  # --fast: точная, но медленная модель → turbo
     clips = plan.get("clips") or []
     if only:
         clips = [c for c in clips if str(c.get("id")) in only]
