@@ -1,5 +1,6 @@
 """Монтаж вертикальных клипов 9:16 по плану clips.yaml."""
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -248,10 +249,18 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
             cmd += ["-preset", "p5", "-rc", "vbr", "-cq", str(o["crf"]), "-b:v", "0"]
         else:
             cmd += ["-preset", o.get("preset", "medium"), "-crf", str(o["crf"])]
-        cmd += ["-t", f"{total:.3f}", "-movflags", "+faststart"]
-        out = out_dir / f"{cid}.mp4"
+        now = datetime.now(timezone.utc)
+        cmd += ["-t", f"{total:.3f}", "-movflags", "+faststart",
+                "-map_metadata", "-1", "-metadata", f"creation_time={now.strftime('%Y-%m-%dT%H:%M:%SZ')}"]
+        # Уникальное имя: проект + id + время рендера. Повторная заливка файла с тем же
+        # именем выглядит как дубликат, а так каждая версия клипа — новый файл.
+        out = out_dir / f"{pdir.name}_{cid}_{now.strftime('%y%m%d-%H%M%S')}.mp4"
         cmd.append(out.name)
     run(cmd, cwd=out_dir)
+    if not preview_png:  # старые версии этого клипа больше не нужны
+        for old in [*out_dir.glob(f"{pdir.name}_{cid}_*.mp4"), out_dir / f"{cid}.mp4"]:
+            if old.exists() and old != out:
+                old.unlink()
     return out
 
 
