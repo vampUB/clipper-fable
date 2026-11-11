@@ -28,6 +28,7 @@ layouts:
     blur: 30
     darken: 0.35
     zoom: 1.0                       # >1 — подрезать края и увеличить
+    height: null                    # высота картинки в px; больше 608 — края по бокам обрезаются
     y_offset: 0                     # сдвиг картинки по вертикали в px
   # Просто вертикальная вырезка из кадра
   crop:
@@ -57,7 +58,7 @@ subs:
 title:
   enabled: true
   font: Montserrat Black
-  size: 64
+  size: 80
   color: "#000000"
   box_color: "#FFFFFF"
   uppercase: true
@@ -69,6 +70,9 @@ whisper:
   language: ru
   device: auto       # auto/cuda/cpu
   compute_type: auto
+  # Модель для субтитров готовых клипов (перераспознаёт только их куски — точнее).
+  # null — брать слова из общего transcript.json
+  clip_model: null
 
 analyze:
   top: 25               # сколько кандидатов выдавать

@@ -48,10 +48,15 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int) -> st
         b = max(1, int(lcfg.get("blur", 30)) // 4)
         yo = int(lcfg.get("y_offset", 0))
         sw4, sh4 = _even(W / 4), _even(H / 4)
+        if lcfg.get("height"):  # крупнее: масштаб по высоте, края по бокам обрезаются
+            fg = (f"[s2]crop=iw/{z}:ih/{z},scale=-2:{_even(lcfg['height'])}:flags=lanczos,"
+                  f"crop='min(iw,{W})':ih,setsar=1[fg];")
+        else:
+            fg = f"[s2]crop=iw/{z}:ih/{z},scale={W}:-2:flags=lanczos,setsar=1[fg];"
         return (f"[vc]split=2[s1][s2];"
                 f"[s1]scale={sw4}:{sh4}:force_original_aspect_ratio=increase,crop={sw4}:{sh4},"
                 f"boxblur={b}:2,scale={W}:{H},eq=brightness={-d:.2f},setsar=1[bg];"
-                f"[s2]crop=iw/{z}:ih/{z},scale={W}:-2:flags=lanczos,setsar=1[fg];"
+                + fg +
                 f"[bg][fg]overlay=(W-w)/2:(H-h)/2+{yo}[lay]")
     if name == "crop":
         w, h, x, y = fit_rect(lcfg.get("rect", [0, 0, 1, 1]), sw, sh, W, H, lcfg.get("focus_x", 0.5))
@@ -84,7 +89,7 @@ def safe_id(s: str) -> str:
 
 def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: bool = False,
                 fake_words: list | None = None) -> Path:
-    ccfg = deep_merge(cfg, {k: clip[k] for k in ("output", "layouts", "subs", "title") if isinstance(clip.get(k), dict)})
+    ccfg = deep_merge(cfg, {k: clip[k] for k in ("output", "layouts", "subs", "title", "whisper") if isinstance(clip.get(k), dict)})
     if clip.get("subs") is False:
         ccfg["subs"]["enabled"] = False
     o = ccfg["output"]
@@ -103,11 +108,14 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     # слова с пересчётом времени в таймлайн клипа
     words = []
     if ccfg["subs"].get("enabled", True):
-        raw = fake_words if fake_words is not None else words_in_range(cfg, pdir, s0, s1)
+        skip = [(parse_time(x), parse_time(y)) for x, y in clip.get("subs_skip", [])]
         off = 0.0
         for a, b in segs:
+            raw = fake_words if fake_words is not None else words_in_range(ccfg, pdir, a, b)
             for w in raw:
                 mid = (w["start"] + w["end"]) / 2
+                if any(x <= mid < y for x, y in skip):
+                    continue
                 if a <= mid < b:
                     words.append({**w, "start": off + max(0.0, w["start"] - a), "end": off + min(b, w["end"]) - a})
             off += b - a
@@ -125,12 +133,14 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
         encoding="utf-8")
 
     has_a = info["has_audio"] and not preview_png
-    parts, concat_in = [], []
+    # каждый сегмент — отдельный вход с быстрой перемоткой: не держим в памяти видео между кусками
+    inputs, parts, concat_in = [], [], []
     for i, (a, b) in enumerate(segs):
-        parts.append(f"[0:v]trim=start={a - s0:.3f}:end={b - s0:.3f},setpts=PTS-STARTPTS[v{i}]")
+        inputs += ["-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", src.resolve()]
+        parts.append(f"[{i}:v]setpts=PTS-STARTPTS[v{i}]")
         concat_in.append(f"[v{i}]")
         if has_a:
-            parts.append(f"[0:a]atrim=start={a - s0:.3f}:end={b - s0:.3f},asetpts=PTS-STARTPTS[a{i}]")
+            parts.append(f"[{i}:a]asetpts=PTS-STARTPTS[a{i}]")
             concat_in.append(f"[a{i}]")
     parts.append("".join(concat_in) + f"concat=n={len(segs)}:v=1:a={1 if has_a else 0}"
                  + ("[vc][ac]" if has_a else "[vc]"))
@@ -141,8 +151,7 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
         parts.append("[ac]" + ("loudnorm=I=-14:TP=-1.5:LRA=11," if o.get("loudnorm") else "")
                      + "aresample=48000[a]")
 
-    cmd = ["ffmpeg", "-v", "error", *([] if preview_png else ["-stats"]), "-y", "-ss", f"{s0:.3f}", "-t", f"{s1 - s0 + 0.5:.3f}",
-           "-i", src.resolve(), "-filter_complex", ";".join(parts), "-map", "[v]"]
+    cmd = ["ffmpeg", "-v", "error", *([] if preview_png else ["-stats"]), "-y", *inputs, "-filter_complex", ";".join(parts), "-map", "[v]"]
     if preview_png:
         out = out_dir / f"{cid}.png"
         cmd += ["-ss", "0.5", "-frames:v", "1", out.name]

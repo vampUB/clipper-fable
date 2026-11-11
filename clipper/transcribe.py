@@ -5,13 +5,10 @@ from pathlib import Path
 
 from .util import find_source, fmt_time, read_json, run, write_json
 
-_MODEL = None
+_MODELS = {}
 
 
 def _load_model(wcfg: dict):
-    global _MODEL
-    if _MODEL is not None:
-        return _MODEL
     from faster_whisper import WhisperModel
 
     device = wcfg.get("device", "auto")
@@ -27,10 +24,12 @@ def _load_model(wcfg: dict):
     model = wcfg.get("model", "auto")
     if model == "auto":
         model = "large-v3" if device == "cuda" else "small"
-    print(f"→ whisper: модель {model}, {device}/{compute}")
-    _MODEL = WhisperModel(model, device=device, compute_type=compute)
-    _MODEL._clipper_name = model
-    return _MODEL
+    if model not in _MODELS:
+        print(f"→ whisper: модель {model}, {device}/{compute}")
+        m = WhisperModel(model, device=device, compute_type=compute)
+        m._clipper_name = model
+        _MODELS[model] = m
+    return _MODELS[model]
 
 
 def _transcribe_file(audio: Path, wcfg: dict, offset: float = 0.0, progress_total: float | None = None):
@@ -93,11 +92,13 @@ def transcribe_project(cfg: dict, pdir: Path):
 def words_in_range(cfg: dict, pdir: Path, start: float, end: float) -> list[dict]:
     """Слова в [start, end] (секунды исходника). Берёт из полного транскрипта
     или распознаёт только этот кусок (с кэшем)."""
+    clip_model = cfg["whisper"].get("clip_model")
     full = pdir / "transcript.json"
-    if full.exists():
+    if full.exists() and not clip_model:
         segs = read_json(full)["segments"]
         return [w for s in segs for w in s["words"] if w["end"] > start and w["start"] < end]
-    cache = pdir / "cache" / f"words_{start:.2f}_{end:.2f}.json"
+    wcfg = dict(cfg["whisper"], model=clip_model) if clip_model else cfg["whisper"]
+    cache = pdir / "cache" / f"words_{wcfg['model']}_{start:.2f}_{end:.2f}.json"
     if cache.exists():
         return read_json(cache)
     cache.parent.mkdir(exist_ok=True)
@@ -106,7 +107,7 @@ def words_in_range(cfg: dict, pdir: Path, start: float, end: float) -> list[dict
     with tempfile.TemporaryDirectory() as td:
         wav = Path(td) / "a.wav"
         _extract_audio(find_source(pdir), wav, a, end + pad)
-        segs = _transcribe_file(wav, cfg["whisper"], offset=a)
+        segs = _transcribe_file(wav, wcfg, offset=a)
     words = [w for s in segs for w in s["words"] if w["end"] > start and w["start"] < end]
     write_json(cache, words)
     return words

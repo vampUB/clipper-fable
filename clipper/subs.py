@@ -80,6 +80,11 @@ def build_ass(words: list[dict], clip_start: float, clip_end: float, W: int, H: 
             txt = _clean_word(w["word"], scfg)
             if not txt:
                 continue
+            if txt.startswith("-") and prepared:  # whisper режет «что-то» на «что» + «-то»
+                prepared[-1]["text"] += txt
+                prepared[-1]["raw"] += w["word"]
+                prepared[-1]["end"] = min(dur, w["end"] - clip_start)
+                continue
             prepared.append({"text": txt, "raw": w["word"],
                              "start": max(0.0, w["start"] - clip_start),
                              "end": min(dur, w["end"] - clip_start)})
