@@ -1,0 +1,115 @@
+# Общие настройки нарезки. Любой параметр можно переопределить
+# для конкретного проекта в work/<проект>/clips.yaml (секция defaults)
+# или для отдельного клипа.
+
+work_dir: work
+
+output:
+  width: 1080
+  height: 1920
+  fps: 30
+  crf: 20            # меньше = лучше качество и больше файл (18-23 норм)
+  preset: medium     # ultrafast..veryslow
+  audio_bitrate: 160k
+  loudnorm: true     # выровнять громкость под соцсети (~ -14 LUFS)
+
+# Раскладки кадра. Прямоугольники задаются в ДОЛЯХ исходного кадра:
+# [x, y, w, h], где 0..1 (0,0 — левый верхний угол).
+# Узнать координаты вебки: python -m clipper frames <проект> --at 10:00 --grid
+layouts:
+  # Вебка сверху, геймплей снизу — классика для стримов
+  stream:
+    top_height: 700                 # высота блока вебки в px (из 1920)
+    cam: [0.0, 0.0, 0.25, 0.30]     # где вебка на исходнике
+    game: [0.0, 0.0, 1.0, 1.0]      # какую часть кадра брать под геймплей
+    game_focus_x: 0.5               # куда смещать вертикальную вырезку (0 лево, 1 право)
+  # Весь кадр по центру, сверху/снизу размытый фон
+  blur:
+    blur: 30
+    darken: 0.35
+    zoom: 1.0                       # >1 — подрезать края и увеличить
+    height: null                    # высота картинки в px; больше 608 — края по бокам обрезаются
+    y_offset: 0                     # сдвиг картинки по вертикали в px
+  # Просто вертикальная вырезка из кадра
+  crop:
+    rect: [0.0, 0.0, 1.0, 1.0]
+    focus_x: 0.5
+
+subs:
+  enabled: true
+  font: Montserrat Black
+  size: 86
+  color: "#FFFFFF"
+  highlight: "#FFE500"          # цвет текущего слова
+  outline: 6
+  outline_color: "#000000"
+  shadow: 2
+  uppercase: true
+  strip_punctuation: true
+  max_words: 3                  # слов на экране одновременно
+  max_chars: 20
+  pop: true                     # активное слово чуть увеличено
+  # Вертикальная позиция центра субтитров (px от верха, из 1920).
+  # null — автоматически: для stream чуть ниже вебки, иначе ~ 72% высоты
+  y: null
+  # Ручные правки распознавания: "что распознал whisper" -> "как писать"
+  replace: {}
+
+title:
+  enabled: true
+  font: Montserrat Black
+  size: 80
+  color: "#000000"
+  box_color: "#FFFFFF"
+  uppercase: true
+  duration: 4.0                 # секунд в начале клипа; 0 — весь клип
+  y: null                       # null — автоматически
+
+whisper:
+  model: auto        # auto: large-v3 на GPU, small на CPU; можно tiny/base/small/medium/large-v3/turbo
+  language: ru
+  device: auto       # auto/cuda/cpu
+  compute_type: auto
+  # Модель для субтитров готовых клипов (перераспознаёт только их куски — точнее).
+  # null — брать слова из общего transcript.json
+  clip_model: null
+
+analyze:
+  top: 25               # сколько кандидатов выдавать
+  min_gap: 90           # минимум секунд между кандидатами
+  before: 25            # секунд до пика в предлагаемом окне
+  after: 15             # секунд после пика
+  chat_delay: 6         # на сколько секунд чат отстаёт от момента
+  weights:
+    loudness: 1.0
+    chat: 1.5
+    speech: 0.7
+  # Слова в речи стримера, которые часто означают хайлайт
+  speech_keywords:
+    - ааа
+    - бля
+    - нихуя
+    - охуеть
+    - пиздец
+    - ебать
+    - рампага
+    - ультра
+    - вау
+    - да ладно
+    - что за
+    - ты видел
+    - гг
+  # Реакции чата
+  chat_keywords:
+    - kekw
+    - lul
+    - omegalul
+    - pog
+    - pogchamp
+    - "???"
+    - ахах
+    - хаха
+    - ")))"
+    - лол
+    - гг
+    - "+"
