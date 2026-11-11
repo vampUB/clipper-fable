@@ -1,0 +1,5 @@
+yt-dlp[default]
+faster-whisper>=1.1
+numpy
+pyyaml
+chat-downloader   # чат Twitch VOD (необязательно, неофициальная библиотека)
