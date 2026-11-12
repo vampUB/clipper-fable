@@ -52,8 +52,9 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
         yo = int(lcfg.get("y_offset", 0))
         sw4, sh4 = _even(W / 4), _even(H / 4)
         if lcfg.get("height"):  # крупнее: масштаб по высоте, края по бокам обрезаются
+            fx = min(1.0, max(0.0, float(lcfg.get("focus_x", 0.5))))  # куда смотреть, если герой не в центре
             fg = (f"[s2{t}]crop=iw/{z}:ih/{z},scale=-2:{_even(lcfg['height'])}:flags=lanczos,"
-                  f"crop='min(iw,{W})':ih,setsar=1[fg{t}];")
+                  f"crop='min(iw,{W})':ih:'(iw-ow)*{fx:.3f}':0,setsar=1[fg{t}];")
         else:
             fg = f"[s2{t}]crop=iw/{z}:ih/{z},scale={W}:-2:flags=lanczos,setsar=1[fg{t}];"
         return (f"{src}split=2[s1{t}][s2{t}];"
@@ -99,6 +100,67 @@ def clip_segments(clip: dict) -> list[dict]:
     return segs
 
 
+def snap_segments(segs: list[dict], fps: float, src_dur: float | None = None, cid=None) -> list[dict]:
+    """Длину каждого сегмента — к целому числу кадров. Иначе видео и звук расходятся на долю
+    кадра на каждой склейке, и в суперкате из 8 кусков субтитры заметно «уезжают»."""
+    for g in segs:
+        if src_dur and g["a"] >= src_dur:
+            die(f"клип {cid}: сегмент {fmt_time(g['a'])} за концом видео ({fmt_time(src_dur)})")
+        if src_dur and g["b"] > src_dur + 0.05:
+            print(f"  ! клип {cid}: сегмент до {fmt_time(g['b'])} обрезан по концу видео ({fmt_time(src_dur)})")
+            g["b"] = src_dur
+        n = max(1, round((g["b"] - g["a"]) / g["speed"] * fps))
+        g["out"] = n / fps
+        g["b"] = g["a"] + g["out"] * g["speed"]
+    return segs
+
+
+def clip_words(ccfg: dict, pdir: Path, clip: dict, segs: list[dict], fake_words: list | None = None) -> list[dict]:
+    """Слова клипа с временем в таймлайне клипа. У каждого слова seg — номер сегмента,
+    src — время в исходнике (для subs_skip и отчёта check)."""
+    skip = [(parse_time(x), parse_time(y)) for x, y in clip.get("subs_skip") or []]
+    # близкие сегменты распознаём одним окном с запасом: короткому куску без контекста
+    # модель слышит слова хуже
+    spans = []
+    for g in sorted(segs, key=lambda g: g["a"]):
+        if g["subs"]:
+            if spans and g["a"] - spans[-1][1] < 60:
+                spans[-1][1] = max(spans[-1][1], g["b"])
+            else:
+                spans.append([g["a"], g["b"]])
+    span_words = []
+    if fake_words is None:
+        for x, y in spans:
+            span_words += words_in_range(ccfg, pdir, round(max(0.0, x - 5), 1), round(y + 5, 1))
+    words, off = [], 0.0
+    for i, g in enumerate(segs):
+        a, b, sp = g["a"], g["b"], g["speed"]
+        if g["subs"]:
+            raw = fake_words if fake_words is not None else span_words
+            for w in raw:
+                mid = (w["start"] + w["end"]) / 2
+                if any(x <= mid < y for x, y in skip):
+                    continue
+                if a <= mid < b:
+                    words.append({**w, "seg": i, "src": w["start"],
+                                  "start": off + max(0.0, w["start"] - a) / sp,
+                                  "end": off + (min(b, w["end"]) - a) / sp})
+        off += g["out"]
+    words.sort(key=lambda w: (w["seg"], w["start"]))
+    return words
+
+
+def clip_config(cfg: dict, clip: dict) -> dict:
+    """Настройки клипа: config.yaml + defaults плана (уже в cfg) + переопределения клипа."""
+    over = {k: clip[k] for k in ("output", "layouts", "subs", "whisper") if isinstance(clip.get(k), dict)}
+    if isinstance(clip.get("title_style"), dict):  # title — текст заголовка, title_style — его настройки
+        over["title"] = clip["title_style"]
+    ccfg = deep_merge(cfg, over)
+    if clip.get("subs") is False:
+        ccfg["subs"]["enabled"] = False
+    return ccfg
+
+
 def _atempo(speed: float) -> str:
     """atempo принимает 0.5..2 — раскладываем на цепочку."""
     parts = []
@@ -126,54 +188,25 @@ def safe_id(s: str) -> str:
 
 def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: bool = False,
                 fake_words: list | None = None) -> Path:
-    over = {k: clip[k] for k in ("output", "layouts", "subs", "whisper") if isinstance(clip.get(k), dict)}
-    if isinstance(clip.get("title_style"), dict):  # title — текст заголовка, title_style — его настройки
-        over["title"] = clip["title_style"]
-    ccfg = deep_merge(cfg, over)
-    if clip.get("subs") is False:
-        ccfg["subs"]["enabled"] = False
+    ccfg = clip_config(cfg, clip)
     o = ccfg["output"]
     W, H = int(o["width"]), int(o["height"])
     src = find_source(pdir)
     info = probe(src)
     sw, sh = info["width"], info["height"]
     layout = clip.get("layout", "stream")
+    if layout not in ccfg["layouts"]:
+        die(f"клип {clip.get('id')}: неизвестная раскладка {layout!r}")
     lcfg = ccfg["layouts"][layout]
+    fps = float(o["fps"])
 
-    segs = clip_segments(clip)
+    segs = snap_segments(clip_segments(clip), fps, None if fake_words is not None else info["duration"],
+                         clip.get("id"))
     total = sum(g["out"] for g in segs)
 
-    # слова с пересчётом времени в таймлайн клипа
     words = []
     if ccfg["subs"].get("enabled", True):
-        skip = [(parse_time(x), parse_time(y)) for x, y in clip.get("subs_skip", [])]
-        # близкие сегменты распознаём одним окном с запасом: короткому куску без контекста
-        # модель слышит слова хуже
-        spans = []
-        for g in sorted(segs, key=lambda g: g["a"]):
-            if g["subs"]:
-                if spans and g["a"] - spans[-1][1] < 60:
-                    spans[-1][1] = max(spans[-1][1], g["b"])
-                else:
-                    spans.append([g["a"], g["b"]])
-        span_words = []
-        if fake_words is None:
-            for x, y in spans:
-                span_words += words_in_range(ccfg, pdir, round(max(0.0, x - 5), 1), round(y + 5, 1))
-        off = 0.0
-        for g in segs:
-            a, b, sp = g["a"], g["b"], g["speed"]
-            if g["subs"]:
-                raw = fake_words if fake_words is not None else span_words
-                for w in raw:
-                    mid = (w["start"] + w["end"]) / 2
-                    if any(x <= mid < y for x, y in skip):
-                        continue
-                    if a <= mid < b:
-                        words.append({**w, "start": off + max(0.0, w["start"] - a) / sp,
-                                      "end": off + (min(b, w["end"]) - a) / sp})
-            off += g["out"]
-        words.sort(key=lambda w: w["start"])
+        words = clip_words(ccfg, pdir, clip, segs, fake_words)
 
     # надписи на отдельных сегментах
     labels, off = [], 0.0
@@ -191,7 +224,8 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     ass_name = f"{cid}.ass"
     (out_dir / ass_name).write_text(
         build_ass(words, 0.0, total, W, H, ccfg["subs"], ccfg["title"], clip.get("title"), subs_y, title_y,
-                  labels=labels, label_y=ccfg["title"].get("label_y") or int(H * 0.5)),
+                  labels=labels, label_y=ccfg["title"].get("label_y") or int(H * 0.5),
+                  cuts=[sum(g["out"] for g in segs[:i]) for i in range(1, len(segs))]),
         encoding="utf-8")
 
     has_a = info["has_audio"] and not preview_png
@@ -199,7 +233,8 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     inputs, parts, concat_in = [], [], []
     for i, g in enumerate(segs):
         a, b, sp, z = g["a"], g["b"], g["speed"], g["zoom"]
-        inputs += ["-ss", f"{a:.3f}", "-t", f"{b - a:.3f}", "-i", src.resolve()]
+        # +0.2 с запаса на входе: точную длину отрезают trim/atrim ниже
+        inputs += ["-ss", f"{a:.3f}", "-t", f"{b - a + 0.2:.3f}", "-i", src.resolve()]
         vf = f"[{i}:v]"
         if z > 1.0:  # резкий зум на сегмент (jump-zoom), focus — центр в долях кадра
             fx, fy = g["focus"]
@@ -207,7 +242,10 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
             cx = min(max(0, int(fx * sw - cw / 2)), sw - cw)
             cy = min(max(0, int(fy * sh - ch / 2)), sh - ch)
             vf += f"crop={cw}:{ch}:{cx}:{cy},scale={sw}:{sh}:flags=lanczos,"
-        vf += f"setpts=(PTS-STARTPTS)/{sp:.4f},fps=60,setsar=1[v{i}]"
+        # сразу в частоту кадров результата и ровно out секунд: раскладка не считает лишние кадры,
+        # а длина видео совпадает со звуком кадр в кадр
+        vf += (f"setpts=(PTS-STARTPTS)/{sp:.4f},fps={o['fps']},trim=duration={g['out']:.5f},"
+               f"setpts=PTS-STARTPTS,setsar=1[v{i}]")
         parts.append(vf)
         g_layout = g["layout"] or layout
         g_lcfg = deep_merge(ccfg["layouts"][g_layout], (g["layouts"] or {}).get(g_layout))
@@ -219,14 +257,25 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
             af = f"[{i}:a]asetpts=PTS-STARTPTS"
             if sp != 1.0:
                 af += "," + _atempo(sp)
-            parts.append(af + f",aresample=48000[a{i}]")
+            af += f",aresample=48000,atrim=duration={g['out']:.5f},asetpts=PTS-STARTPTS"
+            fd = min(float(o.get("audio_fade", 0.012) or 0), g["out"] / 4)
+            if fd > 0:  # микро-фейд на каждой склейке: без него стык щёлкает
+                af += f",afade=t=in:d={fd:.3f},afade=t=out:st={g['out'] - fd:.3f}:d={fd:.3f}"
+            parts.append(af + f"[a{i}]")
             concat_in.append(f"[a{i}]")
     parts.append("".join(concat_in) + f"concat=n={len(segs)}:v=1:a={1 if has_a else 0}"
                  + ("[lay][ac]" if has_a else "[lay]"))
     fonts = str(FONTS_DIR).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
     pb = ccfg["output"].get("progress_bar")
     vtail = "[vs]" if pb else "[v]"
-    parts.append(f"[lay]fps={o['fps']},format=yuv420p,ass={ass_name}:fontsdir='{fonts}'{vtail}")
+    safe = ""
+    if preview_png and clip.get("_safe"):
+        # зоны, которые закрывает интерфейс TikTok/Shorts/Reels: шапка, колонка кнопок, описание
+        z = ccfg.get("safe_zone") or {}
+        st, sb, sr = int(z.get("top", 130)), int(z.get("bottom", 380)), int(z.get("right", 150))
+        safe = (f",drawbox=0:0:{W}:{st}:red@0.28:fill,drawbox=0:{H - sb}:{W}:{sb}:red@0.28:fill,"
+                f"drawbox={W - sr}:{st}:{sr}:{H - st - sb}:red@0.28:fill")
+    parts.append(f"[lay]fps={o['fps']},format=yuv420p,ass={ass_name}:fontsdir='{fonts}'{safe}{vtail}")
     if pb:  # полоска прогресса внизу
         ph = int(pb.get("height", 12)) if isinstance(pb, dict) else 12
         pc = (pb.get("color") if isinstance(pb, dict) else None) or ccfg["subs"]["highlight"]
@@ -258,17 +307,65 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
         cmd.append(out.name)
     run(cmd, cwd=out_dir)
     if not preview_png:  # старые версии этого клипа больше не нужны
-        for old in [*out_dir.glob(f"{pdir.name}_{cid}_*.mp4"), out_dir / f"{cid}.mp4"]:
+        # только версии ЭТОГО клипа: <проект>_<id>_<ГГММДД-ЧЧММСС>.mp4 (а не «01» ↔ «01_b»)
+        stamp = re.compile(re.escape(f"{pdir.name}_{cid}_") + r"\d{6}-\d{6}\.mp4$")
+        for old in [*(p for p in out_dir.glob(f"{pdir.name}_{cid}_*.mp4") if stamp.match(p.name)),
+                    out_dir / f"{cid}.mp4"]:
             if old.exists() and old != out:
                 old.unlink()
     return out
+
+
+def latest_output(out_dir: Path, project: str, cid: str) -> Path | None:
+    stamp = re.compile(re.escape(f"{project}_{cid}_") + r"\d{6}-\d{6}\.mp4$")
+    files = [p for p in out_dir.glob(f"{project}_{cid}_*.mp4") if stamp.match(p.name)]
+    return max(files, key=lambda p: p.name) if files else None
+
+
+def write_report(pdir: Path, plan: dict, out_dir: Path) -> Path:
+    """out/report.md — готовый отчёт: файл, длина, формат, о чём клип, подпись, описание, хэштеги.
+    Поля format / story / desc / tags / title_alt в clips.yaml на монтаж не влияют — они для отчёта."""
+    lines = [f"# {pdir.name}: готовые клипы", ""]
+    for c in plan.get("clips") or []:
+        cid = safe_id(c.get("id", "clip"))
+        f = latest_output(out_dir, pdir.name, cid)
+        if not f:
+            continue
+        dur = probe(f)["duration"]
+        lines.append(f"## {c.get('id')} — {dur:.1f} с" + (f" · {c['format']}" if c.get("format") else ""))
+        lines.append(f"- файл: `{f.name}`")
+        if c.get("title"):
+            lines.append("- подпись: " + str(c["title"]).replace("\n", " / "))
+        alt = c.get("title_alt")
+        if alt:
+            lines.append("- варианты подписи: " + "; ".join(alt if isinstance(alt, list) else [str(alt)]))
+        if c.get("story"):
+            lines.append(f"- о чём: {c['story']}")
+        if c.get("desc"):
+            lines.append(f"- описание: {c['desc']}")
+        tags = c.get("tags")
+        if tags:
+            tags = tags if isinstance(tags, list) else str(tags).split()
+            lines.append("- хэштеги: " + " ".join(t if str(t).startswith("#") else f"#{t}" for t in tags))
+        lines.append("")
+    p = out_dir / "report.md"
+    p.write_text("\n".join(lines), encoding="utf-8")
+    return p
 
 
 def render(cfg: dict, pdir: Path, plan_path: str | None, only: list[str] | None):
     plan = load_plan(pdir, plan_path)
     pcfg = deep_merge(cfg, plan.get("defaults"))
     clips = plan.get("clips") or []
+    ids = [safe_id(c.get("id", "clip")) for c in clips]
+    dup = sorted({i for i in ids if ids.count(i) > 1})
+    if dup:
+        die(f"в плане повторяются id: {', '.join(dup)} — клипы затрут друг друга")
     if only:
+        known = {str(c.get("id")) for c in clips}
+        for x in only:
+            if x not in known:
+                print(f"  ! --only {x}: такого id в плане нет")
         clips = [c for c in clips if str(c.get("id")) in only]
     if not clips:
         die("в плане нет клипов (или --only ничего не выбрал)")
@@ -279,10 +376,11 @@ def render(cfg: dict, pdir: Path, plan_path: str | None, only: list[str] | None)
         print(f"[{i}/{len(clips)}] {c.get('id')}  {fmt_time(segs[0]['a'])}  {dur:.1f}s  ({c.get('layout', 'stream')})")
         out = render_clip(pcfg, pdir, c, out_dir)
         print(f"  ✓ {out}")
-    print(f"✓ готово: {out_dir}")
+    rep_p = write_report(pdir, plan, out_dir)
+    print(f"✓ готово: {out_dir}  (отчёт: {rep_p.name}; проверка кадров: python -m clipper review {pdir.name})")
 
 
-def preview(cfg: dict, pdir: Path, at: str, layout: str | None, plan_path: str | None):
+def preview(cfg: dict, pdir: Path, at: str, layout: str | None, plan_path: str | None, safe: bool = False):
     """Один кадр готовой раскладки с примером заголовка и субтитров — проверить координаты."""
     pcfg = cfg
     p = Path(plan_path) if plan_path else pdir / "clips.yaml"
@@ -294,7 +392,8 @@ def preview(cfg: dict, pdir: Path, at: str, layout: str | None, plan_path: str |
             for i, w in enumerate(["пример", "субтитров", "тут"])]
     outs = []
     for lay in layouts:
-        clip = {"id": f"preview_{lay}", "start": t, "end": t + 1.0, "layout": lay, "title": "Пример заголовка"}
+        clip = {"id": f"preview_{lay}", "start": t, "end": t + 1.0, "layout": lay, "title": "Пример заголовка",
+                "_safe": safe}
         outs.append(render_clip(pcfg, pdir, clip, pdir / "frames", preview_png=True, fake_words=fake))
     for o in outs:
         print(f"✓ {o}")

@@ -24,7 +24,7 @@ def _grid_filter(w: int, h: int) -> str:
 
 
 def frames(pdir: Path, at=None, start=None, end=None, n: int = 6, span: float = 20.0,
-           grid: bool = False, width: int = 640) -> Path:
+           grid: bool = False, width: int = 640, step: float | None = None) -> Path:
     src = find_source(pdir)
     info = probe(src)
     out_dir = pdir / "frames"
@@ -43,9 +43,14 @@ def frames(pdir: Path, at=None, start=None, end=None, n: int = 6, span: float = 
         a, b = max(0.0, c - span / 2), min(info["duration"], c + span / 2)
     else:
         a, b = parse_time(start), parse_time(end)
-    n = max(1, n)
-    times = [a + (b - a) * (i + 0.5) / n for i in range(n)]
-    cols = 3 if n > 4 else n if n < 3 else 2
+    if step and step > 0:   # покадровый разбор: кадр каждые step секунд, начиная с a
+        n = min(48, int((b - a) / step) + 1)
+        times = [a + i * step for i in range(n)]
+        width = 480
+    else:
+        n = max(1, n)
+        times = [a + (b - a) * (i + 0.5) / n for i in range(n)]
+    cols = 4 if n > 9 else 3 if n > 4 else n if n < 3 else 2
     rows = (n + cols - 1) // cols
     with tempfile.TemporaryDirectory() as td:
         for i, t in enumerate(times):

@@ -32,6 +32,9 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
             except OSError:
                 shutil.copy2(src, dst)
         meta["title"] = Path(src).stem
+        if start_s or end_s:
+            print("  ! --from/--to для локального файла не применяются — файл подключён целиком")
+            meta["offset"] = 0.0
     else:
         fmt = f"bv*[height<={max_height}]+ba/b[height<={max_height}]"
         cmd = [sys.executable, "-m", "yt_dlp", "-f", fmt, "--merge-output-format", "mp4",
