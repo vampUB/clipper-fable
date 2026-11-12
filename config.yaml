@@ -72,8 +72,8 @@ title:
   size: 80
   color: "#000000"
   box_color: "#FFFFFF"
-  uppercase: true
-  duration: 4.0                 # секунд в начале клипа; 0 — весь клип
+  uppercase: false              # строчными — так нравится пользователю (CLAUDE.md, раздел 7)
+  duration: 3.5                 # секунд в начале клипа; 0 — весь клип
   y: null                       # null — автоматически
 
 whisper:

@@ -30,11 +30,16 @@ tmux new -s clips 'claude remote-control'
 ```bash
 python -m clipper fetch <ссылка|файл> --name nix1 [--from 1:00:00 --to 2:00:00] [--cookies cookies.txt]
 python -m clipper transcribe nix1            # речь → transcript.json/txt (GPU сильно быстрее)
-python -m clipper analyze nix1 --top 30      # кандидаты → moments.txt
+python -m clipper analyze nix1 --top 30      # кандидаты → moments.txt (громкие и тихие) + talk.txt
+python -m clipper talk nix1                  # разговорные блоки, повторы, сетапы/развязки → talk.txt
 python -m clipper frames nix1 --at 1:02:30   # лист кадров вокруг момента
+python -m clipper frames nix1 --from 1:02:28 --to 1:02:32 --step 0.25   # разбор драки по кадрам
 python -m clipper frames nix1 --at 10:00 --grid   # кадр с сеткой — найти координаты вебки
-python -m clipper preview nix1 --at 10:00    # как выглядит раскладка 9:16
-python -m clipper render nix1 [--only 01-x]  # монтаж по work/nix1/clips.yaml → work/nix1/out/
+python -m clipper preview nix1 --at 10:00 [--safe]   # раскладка 9:16; --safe — зоны интерфейса TikTok
+python -m clipper check nix1 [--asr]         # проверка плана до рендера: границы, хук, хвост, подписи
+python -m clipper render nix1 [--only 01-x]  # монтаж по work/nix1/clips.yaml → work/nix1/out/ + report.md
+python -m clipper review nix1                # листы кадров готовых клипов + текст субтитров
+./tests/selftest.sh                          # прогон пайплайна на синтетическом видео
 ```
 
 Формат плана — `clips.example.yaml`, все настройки (шрифты, цвета, размеры, веса анализа) — `config.yaml`.
@@ -45,10 +50,12 @@ python -m clipper render nix1 [--only 01-x]  # монтаж по work/nix1/clips
 |---|---|
 | `clipper/download.py` | yt-dlp + чат YouTube/Twitch → `source.mp4`, `chat.jsonl` |
 | `clipper/transcribe.py` | faster-whisper с таймкодами слов; умеет распознавать только нужный кусок |
-| `clipper/analyze.py` | громкость/чат/ключевые слова → рейтинг моментов |
+| `clipper/analyze.py` | громкость/чат/ключевые слова → рейтинг моментов, отдельно «тихие» кандидаты |
+| `clipper/talk.py` | поиск по транскрипту: разговорные блоки, повторы, сетапы и развязки |
+| `clipper/check.py` | проверка плана (`check`) и готовых клипов (`review`) |
 | `clipper/frames.py` | листы кадров и сетка координат (чтобы Claude «видел» видео) |
 | `clipper/render.py` | склейка сегментов, раскладки stream/blur/crop, субтитры, нормализация звука |
-| `clipper/subs.py` | ASS-субтитры в стиле TikTok |
+| `clipper/subs.py` | ASS-субтитры в стиле TikTok, замены, автоцензура мата |
 
 Шрифт Montserrat (OFL) лежит в `fonts/`.
 
