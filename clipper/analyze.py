@@ -91,6 +91,27 @@ def speech_signal(segments: list, n: int, keywords: list[str]) -> np.ndarray:
     return sig
 
 
+def density_signal(segments: list, n: int) -> np.ndarray:
+    """Слов в секунду: плотный разговор без крика — то, что громкость не ловит."""
+    sig = np.zeros(n, dtype=np.float32)
+    for s in segments:
+        for w in s.get("words") or []:
+            i = int(w["start"])
+            if 0 <= i < n:
+                sig[i] += 1.0
+    return sig
+
+
+def _pick(score: np.ndarray, top: int, min_gap: int, taken: list[int], floor: float | None = None) -> list[int]:
+    peaks = []
+    for i in np.argsort(-score):
+        if len(peaks) >= top or (floor is not None and score[i] <= floor):
+            break
+        if all(abs(int(i) - p) >= min_gap for p in [*taken, *peaks]):
+            peaks.append(int(i))
+    return peaks
+
+
 def analyze(cfg: dict, pdir: Path, top: int | None = None):
     acfg = cfg["analyze"]
     top = top or acfg["top"]
@@ -105,6 +126,9 @@ def analyze(cfg: dict, pdir: Path, top: int | None = None):
         print("→ считаю громкость (на длинных VOD это пара минут)")
         loud = loudness_per_second(src)
         np.save(cache, loud)
+    if loud.size == 0:  # видео без звука: анализ только по чату и речи
+        print("  ! в видео нет звука — громкость не учитывается")
+        loud = np.zeros(max(1, int(dur)), dtype=np.float32)
     n = loud.size
     w = acfg["weights"]
 
@@ -127,20 +151,33 @@ def analyze(cfg: dict, pdir: Path, top: int | None = None):
     used = ", ".join(comps)
     print(f"→ сигналы: {used}")
 
-    order = np.argsort(-score)
-    peaks = []
-    for i in order:
-        if len(peaks) >= top:
-            break
-        if all(abs(i - p) >= acfg["min_gap"] for p in peaks):
-            peaks.append(int(i))
+    peaks = _pick(score, top, acfg["min_gap"], [], floor=0.0) or _pick(score, 1, acfg["min_gap"], [])
+    kinds = {p: "громкий" for p in peaks}
+
+    # Тихие кандидаты: чат/речь активны, а громкость обычная. Основной рейтинг их топит,
+    # потому что крики в драках всегда громче разговорного рофла.
+    n_quiet = acfg.get("quiet_top")
+    n_quiet = max(3, top // 3) if n_quiet is None else int(n_quiet)
+    if n_quiet and (segments or "chat" in comps):
+        q = np.zeros(n, dtype=np.float32)
+        if "chat" in comps:
+            q += w.get("chat", 1.5) * comps["chat"]
+        if segments:
+            q += w.get("speech", 0.7) * comps["speech"]
+            q += float(acfg.get("density_weight", 0.6)) * np.clip(
+                robust_z(smooth(density_signal(segments, n), 15)), -2, 4)
+        q = np.where(comps["loudness"] < float(acfg.get("quiet_max_loudness", 1.0)), q, -99.0)
+        for p in _pick(q, n_quiet, max(20, acfg["min_gap"] // 2), peaks, floor=0.5):
+            peaks.append(p)
+            kinds[p] = "тихий"
+            score[p] = q[p]
 
     moments = []
     for rank, p in enumerate(peaks, 1):
         a = max(0.0, p - acfg["before"])
         b = min(dur, p + acfg["after"])
         m = {
-            "rank": rank, "peak": p, "peak_tc": fmt_time(p),
+            "rank": rank, "kind": kinds[p], "peak": p, "peak_tc": fmt_time(p),
             "start": round(a, 1), "end": round(b, 1),
             "start_tc": fmt_time(a), "end_tc": fmt_time(b),
             "score": round(float(score[p]), 2),
@@ -158,7 +195,8 @@ def analyze(cfg: dict, pdir: Path, top: int | None = None):
     write_json(pdir / "moments.json", moments)
     with open(pdir / "moments.txt", "w", encoding="utf-8") as f:
         for m in moments:
-            f.write(f"#{m['rank']:02d}  {m['start_tc']} – {m['end_tc']}  пик {m['peak_tc']}  score {m['score']}  {m['signals']}\n")
+            f.write(f"#{m['rank']:02d}  [{m['kind']}]  {m['start_tc']} – {m['end_tc']}  пик {m['peak_tc']}  "
+                    f"score {m['score']}  {m['signals']}\n")
             if m.get("speech"):
                 f.write(f"    речь: {m['speech']}\n")
             if m.get("chat_top"):
@@ -166,3 +204,10 @@ def analyze(cfg: dict, pdir: Path, top: int | None = None):
             f.write("\n")
     print((pdir / "moments.txt").read_text(encoding="utf-8"))
     print(f"✓ {len(moments)} кандидатов → moments.json / moments.txt")
+    if segments:
+        from .talk import talk
+        talk(cfg, pdir, quiet=True)
+        print("  разговорные блоки, повторы и сетапы → talk.txt (прочитай его: лучшие рофлы — тихие)")
+    else:
+        print("  ! нет транскрипта: найдены только громкие моменты. Разговорные рофлы ищутся по "
+              "transcript.json (`transcribe`, затем `talk`).")
