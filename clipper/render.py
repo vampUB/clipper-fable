@@ -1,5 +1,6 @@
 """Монтаж вертикальных клипов 9:16 по плану clips.yaml."""
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -32,16 +33,18 @@ def fit_rect(rect, sw: int, sh: int, tw: int, th: int, focus_x=0.5, focus_y=0.5)
     return w, h, x, y
 
 
-def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int) -> str:
-    """Цепочка фильтров [vc] -> [lay]."""
+def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
+                  src: str = "[vc]", dst: str = "[lay]", tag: str = "") -> str:
+    """Цепочка фильтров src -> dst. tag — суффикс внутренних меток (раскладка на каждый сегмент)."""
+    t = tag
     if name == "stream":
         top = _even(lcfg["top_height"])
         cw, ch, cx, cy = fit_rect(lcfg["cam"], sw, sh, W, top)
         gw, gh, gx, gy = fit_rect(lcfg["game"], sw, sh, W, H - top, lcfg.get("game_focus_x", 0.5))
-        return (f"[vc]split=2[s1][s2];"
-                f"[s1]crop={cw}:{ch}:{cx}:{cy},scale={W}:{top}:flags=lanczos,setsar=1[cam];"
-                f"[s2]crop={gw}:{gh}:{gx}:{gy},scale={W}:{H - top}:flags=lanczos,setsar=1[game];"
-                f"[cam][game]vstack=inputs=2[lay]")
+        return (f"{src}split=2[s1{t}][s2{t}];"
+                f"[s1{t}]crop={cw}:{ch}:{cx}:{cy},scale={W}:{top}:flags=lanczos,setsar=1[cam{t}];"
+                f"[s2{t}]crop={gw}:{gh}:{gx}:{gy},scale={W}:{H - top}:flags=lanczos,setsar=1[game{t}];"
+                f"[cam{t}][game{t}]vstack=inputs=2{dst}")
     if name == "blur":
         z = float(lcfg.get("zoom", 1.0))
         d = float(lcfg.get("darken", 0.35))
@@ -49,24 +52,25 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int) -> st
         yo = int(lcfg.get("y_offset", 0))
         sw4, sh4 = _even(W / 4), _even(H / 4)
         if lcfg.get("height"):  # крупнее: масштаб по высоте, края по бокам обрезаются
-            fg = (f"[s2]crop=iw/{z}:ih/{z},scale=-2:{_even(lcfg['height'])}:flags=lanczos,"
-                  f"crop='min(iw,{W})':ih,setsar=1[fg];")
+            fg = (f"[s2{t}]crop=iw/{z}:ih/{z},scale=-2:{_even(lcfg['height'])}:flags=lanczos,"
+                  f"crop='min(iw,{W})':ih,setsar=1[fg{t}];")
         else:
-            fg = f"[s2]crop=iw/{z}:ih/{z},scale={W}:-2:flags=lanczos,setsar=1[fg];"
-        return (f"[vc]split=2[s1][s2];"
-                f"[s1]scale={sw4}:{sh4}:force_original_aspect_ratio=increase,crop={sw4}:{sh4},"
-                f"boxblur={b}:2,scale={W}:{H},eq=brightness={-d:.2f},setsar=1[bg];"
+            fg = f"[s2{t}]crop=iw/{z}:ih/{z},scale={W}:-2:flags=lanczos,setsar=1[fg{t}];"
+        return (f"{src}split=2[s1{t}][s2{t}];"
+                f"[s1{t}]scale={sw4}:{sh4}:force_original_aspect_ratio=increase,crop={sw4}:{sh4},"
+                f"boxblur={b}:2,scale={W}:{H},eq=brightness={-d:.2f},setsar=1[bg{t}];"
                 + fg +
-                f"[bg][fg]overlay=(W-w)/2:(H-h)/2+{yo}[lay]")
+                f"[bg{t}][fg{t}]overlay=(W-w)/2:(H-h)/2+{yo}{dst}")
     if name == "crop":
         w, h, x, y = fit_rect(lcfg.get("rect", [0, 0, 1, 1]), sw, sh, W, H, lcfg.get("focus_x", 0.5))
-        return f"[vc]crop={w}:{h}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1[lay]"
+        return f"{src}crop={w}:{h}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1{dst}"
     die(f"неизвестная раскладка {name!r} (есть: stream, blur, crop)")
 
 
 def clip_segments(clip: dict) -> list[dict]:
     """Сегменты клипа. Элемент — [начало, конец] или словарь
-    {start, end, speed, zoom, focus: [x, y], subs, text}."""
+    {start, end, speed, zoom, focus: [x, y], subs, text, layout, cam, layouts}.
+    layout/cam/layouts — своя раскладка на сегмент (вебка переехала, сцена сменилась)."""
     raw = clip["segments"] if "segments" in clip else [[clip["start"], clip["end"]]]
     segs = []
     for r in raw:
@@ -87,6 +91,9 @@ def clip_segments(clip: dict) -> list[dict]:
             # в ускоренных/замедленных кусках субтитры по умолчанию выключены
             "subs": d.get("subs", speed == 1.0),
             "text": d.get("text"),
+            "layout": d.get("layout"),
+            "cam": d.get("cam"),
+            "layouts": d.get("layouts") if isinstance(d.get("layouts"), dict) else None,
             "out": (b - a) / speed,
         })
     return segs
@@ -202,7 +209,12 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
             vf += f"crop={cw}:{ch}:{cx}:{cy},scale={sw}:{sh}:flags=lanczos,"
         vf += f"setpts=(PTS-STARTPTS)/{sp:.4f},fps=60,setsar=1[v{i}]"
         parts.append(vf)
-        concat_in.append(f"[v{i}]")
+        g_layout = g["layout"] or layout
+        g_lcfg = deep_merge(ccfg["layouts"][g_layout], (g["layouts"] or {}).get(g_layout))
+        if g["cam"]:
+            g_lcfg = dict(g_lcfg, cam=g["cam"])
+        parts.append(layout_filter(g_layout, g_lcfg, sw, sh, W, H, f"[v{i}]", f"[l{i}]", f"_{i}"))
+        concat_in.append(f"[l{i}]")
         if has_a:
             af = f"[{i}:a]asetpts=PTS-STARTPTS"
             if sp != 1.0:
@@ -210,8 +222,7 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
             parts.append(af + f",aresample=48000[a{i}]")
             concat_in.append(f"[a{i}]")
     parts.append("".join(concat_in) + f"concat=n={len(segs)}:v=1:a={1 if has_a else 0}"
-                 + ("[vc][ac]" if has_a else "[vc]"))
-    parts.append(layout_filter(layout, lcfg, sw, sh, W, H))
+                 + ("[lay][ac]" if has_a else "[lay]"))
     fonts = str(FONTS_DIR).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
     pb = ccfg["output"].get("progress_bar")
     vtail = "[vs]" if pb else "[v]"
@@ -238,10 +249,18 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
             cmd += ["-preset", "p5", "-rc", "vbr", "-cq", str(o["crf"]), "-b:v", "0"]
         else:
             cmd += ["-preset", o.get("preset", "medium"), "-crf", str(o["crf"])]
-        cmd += ["-t", f"{total:.3f}", "-movflags", "+faststart"]
-        out = out_dir / f"{cid}.mp4"
+        now = datetime.now(timezone.utc)
+        cmd += ["-t", f"{total:.3f}", "-movflags", "+faststart",
+                "-map_metadata", "-1", "-metadata", f"creation_time={now.strftime('%Y-%m-%dT%H:%M:%SZ')}"]
+        # Уникальное имя: проект + id + время рендера. Повторная заливка файла с тем же
+        # именем выглядит как дубликат, а так каждая версия клипа — новый файл.
+        out = out_dir / f"{pdir.name}_{cid}_{now.strftime('%y%m%d-%H%M%S')}.mp4"
         cmd.append(out.name)
     run(cmd, cwd=out_dir)
+    if not preview_png:  # старые версии этого клипа больше не нужны
+        for old in [*out_dir.glob(f"{pdir.name}_{cid}_*.mp4"), out_dir / f"{cid}.mp4"]:
+            if old.exists() and old != out:
+                old.unlink()
     return out
 
 

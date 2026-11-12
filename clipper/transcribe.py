@@ -101,6 +101,20 @@ def words_in_range(cfg: dict, pdir: Path, start: float, end: float) -> list[dict
     cache = pdir / "cache" / f"words_{wcfg['model']}_{start:.2f}_{end:.2f}.json"
     if cache.exists():
         return read_json(cache)
+    # Окно уже распознавали шире (прошлый рендер этого клипа, проверка фраз)? Берём оттуда:
+    # при перераспознавании слова меняются и уже вычитанные субтитры «плывут».
+    covering = []
+    for f in cache.parent.glob(f"words_{wcfg['model']}_*.json") if cache.parent.exists() else []:
+        try:
+            a_, b_ = (float(x) for x in f.stem.rsplit("_", 2)[1:])
+        except ValueError:
+            continue
+        if a_ <= start and b_ >= end:
+            covering.append(f)
+    if covering:
+        f = max(covering, key=lambda p: p.stat().st_mtime)
+        f.touch()
+        return [w for w in read_json(f) if w["end"] > start and w["start"] < end]
     cache.parent.mkdir(exist_ok=True)
     pad = 1.0
     a = max(0.0, start - pad)
