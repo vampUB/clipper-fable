@@ -29,6 +29,10 @@ def main(argv=None):
     a.add_argument("project")
     a.add_argument("--top", type=int)
 
+    tk = sub.add_parser("talk", help="разговорные моменты по транскрипту: блоки, повторы, сетапы")
+    tk.add_argument("project")
+    tk.add_argument("--top", type=int)
+
     fr = sub.add_parser("frames", help="лист кадров вокруг момента / кадр с сеткой")
     fr.add_argument("project")
     fr.add_argument("--at", help="центр (1:02:30)")
@@ -36,6 +40,7 @@ def main(argv=None):
     fr.add_argument("--to", dest="end")
     fr.add_argument("--span", type=float, default=20.0, help="ширина окна вокруг --at, сек")
     fr.add_argument("-n", type=int, default=6, help="сколько кадров")
+    fr.add_argument("--step", type=float, help="кадр каждые N секунд (0.25–0.5 — разобрать драку по кадрам)")
     fr.add_argument("--grid", action="store_true", help="один полный кадр с сеткой координат")
 
     pv = sub.add_parser("preview", help="кадр готовой раскладки 9:16 (проверить вебку/субтитры)")
@@ -43,6 +48,18 @@ def main(argv=None):
     pv.add_argument("--at", required=True)
     pv.add_argument("--layout", choices=["stream", "blur", "crop"])
     pv.add_argument("--plan")
+    pv.add_argument("--safe", action="store_true", help="закрасить зоны под интерфейсом TikTok/Shorts")
+
+    ck = sub.add_parser("check", help="проверить план до рендера: границы, хук, хвост, паузы, подписи, состав")
+    ck.add_argument("project")
+    ck.add_argument("--plan")
+    ck.add_argument("--only", nargs="+")
+    ck.add_argument("--asr", action="store_true", help="распознать куски моделью клипа (точно как в субтитрах)")
+
+    rv = sub.add_parser("review", help="готовые клипы: лист кадров + текст субтитров для вычитки")
+    rv.add_argument("project")
+    rv.add_argument("--plan")
+    rv.add_argument("--only", nargs="+")
 
     r = sub.add_parser("render", help="смонтировать клипы по clips.yaml")
     r.add_argument("project")
@@ -82,10 +99,19 @@ def main(argv=None):
         if not args.grid and not args.at and not (args.start and args.end):
             die("укажи --at или --from/--to")
         from .frames import frames
-        frames(pdir, args.at, args.start, args.end, args.n, args.span, args.grid)
+        frames(pdir, args.at, args.start, args.end, args.n, args.span, args.grid, step=args.step)
+    elif args.cmd == "talk":
+        from .talk import talk
+        talk(cfg, pdir, args.top)
+    elif args.cmd == "check":
+        from .check import check
+        check(cfg, pdir, args.plan, args.only, args.asr)
+    elif args.cmd == "review":
+        from .check import review
+        review(cfg, pdir, args.plan, args.only)
     elif args.cmd == "preview":
         from .render import preview
-        preview(cfg, pdir, args.at, args.layout, args.plan)
+        preview(cfg, pdir, args.at, args.layout, args.plan, args.safe)
     elif args.cmd == "render":
         from .render import render
         render(cfg, pdir, args.plan, args.only)
