@@ -68,10 +68,57 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
     die(f"неизвестная раскладка {name!r} (есть: stream, blur, crop)")
 
 
+def _insets(clip: dict, d: dict) -> list[dict]:
+    """Врезки «картинка в картинке» сегмента: inset — словарь или список словарей
+    {rect: [x, y, w, h] в долях исходного кадра, width: px, at: [cx, cy] px центра в кадре 9:16,
+     from / to: секунды от начала сегмента (по умолчанию весь сегмент), border: px}.
+    Без inset на сегменте берётся inset клипа (на все сегменты); inset: null на сегменте — без врезки."""
+    raw = d["inset"] if "inset" in d else clip.get("inset")
+    if not raw:
+        return []
+    out = []
+    for r in raw if isinstance(raw, list) else [raw]:
+        rect = r.get("rect")
+        if not (isinstance(rect, list) and len(rect) == 4):
+            die(f"клип {clip.get('id')}: inset.rect — [x, y, w, h] в долях кадра")
+        out.append({"rect": [float(v) for v in rect], "width": int(r.get("width", 540)),
+                    "at": r.get("at", [540, 250]), "from": r.get("from"), "to": r.get("to"),
+                    "border": int(r.get("border", 4))})
+    return out
+
+
+def inset_filter(insets: list[dict], sw: int, sh: int, W: int, H: int, src: str, base: str, dst: str,
+                 tag: str) -> str:
+    """Кладёт поверх base увеличенные куски src (крипы, KDA, золото, индикатор войса)."""
+    parts = [f"{src}split={len(insets)}" + "".join(f"[ins{tag}_{k}]" for k in range(len(insets)))]
+    cur = base
+    for k, ins in enumerate(insets):
+        x, y, w, h = ins["rect"]
+        cw, ch = max(2, _even(w * sw)), max(2, _even(h * sh))
+        cx, cy = min(int(x * sw), sw - cw), min(int(y * sh), sh - ch)
+        bw = ins["border"]
+        iw = _even(ins["width"])
+        ih = _even(iw * ch / cw)
+        ax, ay = int(ins["at"][0] - iw / 2 - bw), int(ins["at"][1] - ih / 2 - bw)
+        ax, ay = min(max(0, ax), W - iw - 2 * bw), min(max(0, ay), H - ih - 2 * bw)
+        en = ""
+        if ins["from"] is not None or ins["to"] is not None:
+            a = float(ins["from"] or 0)
+            b = float(ins["to"]) if ins["to"] is not None else 1e9
+            en = f":enable='between(t,{a:.3f},{b:.3f})'"
+        nxt = dst if k == len(insets) - 1 else f"[insb{tag}_{k}]"
+        parts.append(f"[ins{tag}_{k}]crop={cw}:{ch}:{cx}:{cy},scale={iw}:{ih}:flags=lanczos,"
+                     f"pad=iw+{2 * bw}:ih+{2 * bw}:{bw}:{bw}:white,setsar=1[insp{tag}_{k}]")
+        parts.append(f"{cur}[insp{tag}_{k}]overlay={ax}:{ay}{en}{nxt}")
+        cur = nxt
+    return ";".join(parts)
+
+
 def clip_segments(clip: dict) -> list[dict]:
     """Сегменты клипа. Элемент — [начало, конец] или словарь
-    {start, end, speed, zoom, focus: [x, y], subs, text, layout, cam, layouts}.
-    layout/cam/layouts — своя раскладка на сегмент (вебка переехала, сцена сменилась)."""
+    {start, end, speed, zoom, focus: [x, y], subs, text, layout, cam, layouts, inset}.
+    layout/cam/layouts — своя раскладка на сегмент (вебка переехала, сцена сменилась).
+    inset — увеличенный кусок кадра поверх раскладки (см. _insets)."""
     raw = clip["segments"] if "segments" in clip else [[clip["start"], clip["end"]]]
     segs = []
     for r in raw:
@@ -95,6 +142,7 @@ def clip_segments(clip: dict) -> list[dict]:
             "layout": d.get("layout"),
             "cam": d.get("cam"),
             "layouts": d.get("layouts") if isinstance(d.get("layouts"), dict) else None,
+            "insets": _insets(clip, d),
             "out": (b - a) / speed,
         })
     return segs
@@ -251,7 +299,12 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
         g_lcfg = deep_merge(ccfg["layouts"][g_layout], (g["layouts"] or {}).get(g_layout))
         if g["cam"]:
             g_lcfg = dict(g_lcfg, cam=g["cam"])
-        parts.append(layout_filter(g_layout, g_lcfg, sw, sh, W, H, f"[v{i}]", f"[l{i}]", f"_{i}"))
+        if g["insets"]:  # врезки берут кадр до раскладки — края, обрезанные blur/stream, тоже видны
+            parts.append(f"[v{i}]split=2[vl{i}][vi{i}]")
+            parts.append(layout_filter(g_layout, g_lcfg, sw, sh, W, H, f"[vl{i}]", f"[lb{i}]", f"_{i}"))
+            parts.append(inset_filter(g["insets"], sw, sh, W, H, f"[vi{i}]", f"[lb{i}]", f"[l{i}]", f"_{i}"))
+        else:
+            parts.append(layout_filter(g_layout, g_lcfg, sw, sh, W, H, f"[v{i}]", f"[l{i}]", f"_{i}"))
         concat_in.append(f"[l{i}]")
         if has_a:
             af = f"[{i}:a]asetpts=PTS-STARTPTS"
