@@ -146,7 +146,7 @@ def prepare_words(words: list[dict], scfg: dict, clip_start: float, dur: float) 
 def build_ass(words: list[dict], clip_start: float, clip_end: float, W: int, H: int,
               scfg: dict, tcfg: dict, title: str | None, subs_y: int, title_y: int,
               labels: list | None = None, label_y: int | None = None,
-              cuts: list | None = None) -> str:
+              cuts: list | None = None, tags: list | None = None, tag_y: int | None = None) -> str:
     """cuts — времена склеек в таймлайне клипа: строка субтитров не висит поверх следующей сцены."""
     dur = clip_end - clip_start
     lines = [
@@ -165,6 +165,10 @@ def build_ass(words: list[dict], clip_start: float, clip_end: float, W: int, H: 
         f"Style: Label,{tcfg['font']},{int(tcfg['size'] * 2)},{ass_color(scfg['highlight'])},&H000000FF,"
         f"{ass_color('#000000')},{ass_color('#000000', 0x60)},0,0,0,0,100,100,0,0,1,"
         f"8,3,5,60,60,0,1",
+        # тег «кто говорит» (сегмент who:): мелко, белым по полупрозрачной плашке
+        f"Style: Who,{tcfg['font']},{int(scfg['size'] * 0.55)},{ass_color('#FFFFFF')},&H000000FF,"
+        f"{ass_color('#000000', 0x50)},{ass_color('#000000', 0x50)},0,0,0,0,100,100,0,0,3,"
+        f"10,0,5,60,60,0,1",
         "", "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
@@ -180,6 +184,10 @@ def build_ass(words: list[dict], clip_start: float, clip_end: float, W: int, H: 
         anim = r"\fad(80,120)\t(0,150,\fscx110\fscy110)\t(150,280,\fscx100\fscy100)"
         lines.append(f"Dialogue: 2,{_ts(a)},{_ts(b)},Label,,0,0,0,,"
                      f"{{\\an5\\pos({W // 2},{label_y}){anim}}}{_ml(t)}")
+
+    for (a, b, text) in tags or []:
+        lines.append(f"Dialogue: 2,{_ts(a)},{_ts(b)},Who,,0,0,0,,"
+                     f"{{\\an5\\pos({W // 2},{tag_y})\\fad(60,60)}}{_ml(text)}")
 
     if scfg.get("enabled", True) and words:
         prepared = prepare_words(words, scfg, clip_start, dur)

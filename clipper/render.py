@@ -92,6 +92,7 @@ def clip_segments(clip: dict) -> list[dict]:
             # в ускоренных/замедленных кусках субтитры по умолчанию выключены
             "subs": d.get("subs", speed == 1.0),
             "text": d.get("text"),
+            "who": d.get("who"),          # маленький тег «кто говорит» над субтитрами
             "layout": d.get("layout"),
             "cam": d.get("cam"),
             "layouts": d.get("layouts") if isinstance(d.get("layouts"), dict) else None,
@@ -209,10 +210,12 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
         words = clip_words(ccfg, pdir, clip, segs, fake_words)
 
     # надписи на отдельных сегментах
-    labels, off = [], 0.0
+    labels, tags, off = [], [], 0.0
     for g in segs:
         if g["text"]:
             labels.append((off, off + g["out"], g["text"]))
+        if g["who"]:
+            tags.append((off, off + g["out"], g["who"]))
         off += g["out"]
 
     top = _even(lcfg.get("top_height", 0)) if layout == "stream" else 0
@@ -225,6 +228,7 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     (out_dir / ass_name).write_text(
         build_ass(words, 0.0, total, W, H, ccfg["subs"], ccfg["title"], clip.get("title"), subs_y, title_y,
                   labels=labels, label_y=ccfg["title"].get("label_y") or int(H * 0.5),
+                  tags=tags, tag_y=ccfg["subs"].get("who_y") or subs_y - int(ccfg["subs"]["size"] * 1.3),
                   cuts=[sum(g["out"] for g in segs[:i]) for i in range(1, len(segs))]),
         encoding="utf-8")
 
