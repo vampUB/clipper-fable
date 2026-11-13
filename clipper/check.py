@@ -72,7 +72,9 @@ def check_clip(cfg: dict, pdir: Path, clip: dict, src_words: list[dict] | None, 
 
     # --- длина
     if total < lim["min_len"]:
-        warn.append(f"длина {total:.1f} с — короче {lim['min_len']} с: это точно самодостаточный рофл с панчлайном?")
+        warn.append(f"длина {total:.1f} с — короче {lim['min_len']} с: клип не обрезан? добавь, что было до "
+                    f"(повод, расклад), реакцию после, второй бит той же темы из другой части видео — "
+                    f"короткий клип только если добавить правда нечего")
     elif total > lim["max_len"]:
         warn.append(f"длина {total:.1f} с — длиннее {lim['max_len']} с: держит ли внимание всю длину?")
 
@@ -170,7 +172,7 @@ def check_clip(cfg: dict, pdir: Path, clip: dict, src_words: list[dict] | None, 
 def check(cfg: dict, pdir: Path, plan_path: str | None, only: list[str] | None, asr: bool = False) -> int:
     plan = load_plan(pdir, plan_path)
     pcfg = deep_merge(cfg, plan.get("defaults"))
-    lim = {"min_len": 8, "max_len": 60, "hook_delay": 0.6, "tail_min": 0.25, "tail_keep": 0.8, "tail_max": 1.5,
+    lim = {"min_len": 20, "max_len": 60, "hook_delay": 0.6, "tail_min": 0.25, "tail_keep": 0.8, "tail_max": 1.5,
            "air": 1.2, "phrase_gap": 0.35, "low_prob": 0.45, **(pcfg.get("check") or {})}
     clips = plan.get("clips") or []
     if only:
