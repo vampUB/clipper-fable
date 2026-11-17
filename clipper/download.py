@@ -35,6 +35,9 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
         if start_s or end_s:
             print("  ! --from/--to для локального файла не применяются — файл подключён целиком")
             meta["offset"] = 0.0
+    elif "twitch.tv" in src and (start_s is not None or end_s is not None) and \
+            _twitch_section(src, pdir, start_s or 0.0, end_s, max_height, meta, extra):
+        pass  # кусок VOD собран из фрагментов HLS параллельно (см. _twitch_section)
     else:
         fmt = f"bv*[height<={max_height}]+ba/b[height<={max_height}]"
         cmd = [sys.executable, "-m", "yt_dlp", "-f", fmt, "--merge-output-format", "mp4",
@@ -79,7 +82,7 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
         if yt_chat.exists():
             n = convert_youtube_chat(yt_chat, pdir / "chat.jsonl", meta["offset"])
         elif "twitch.tv" in src:
-            n = download_twitch_chat(src, pdir / "chat.jsonl", start_s, end_s)
+            n = download_twitch_chat(src, pdir / "chat.jsonl", meta["offset"] or start_s, end_s)
         print(f"→ сообщений чата: {n}" if n else "→ чат не найден (это ок, анализ будет по звуку и речи)")
 
     from .util import find_source
@@ -89,6 +92,69 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
     write_json(pdir / "meta.json", meta)
     print(f"✓ проект: {name}  ({fmt_time(info['duration'])}, {meta['resolution']})  → {pdir}")
     return name
+
+
+def _twitch_section(src: str, pdir: Path, start: float, end: float | None, max_height: int,
+                    meta: dict, extra: list | None) -> bool:
+    """Кусок Twitch VOD: качаем только нужные фрагменты HLS параллельно и склеиваем без перекодирования.
+
+    `yt-dlp --download-sections` отдаёт такой кусок ffmpeg-у, а тот тянет фрагменты по одному
+    (~0.5 МБ/с: 40 минут 1080p60 — больше часа). Параллельно — десятки секунд.
+    Начало округляется вниз до границы фрагмента (~10 с); точный сдвиг пишется в meta["offset"].
+    Не вышло — возвращаем False, и fetch идёт обычным путём через yt-dlp.
+    """
+    import concurrent.futures as cf
+    import urllib.parse
+    if not shutil.which("curl"):
+        return False
+    try:
+        out = subprocess.run([sys.executable, "-m", "yt_dlp", "--print", "title", "--print", "urls",
+                              "-f", f"b[height<={max_height}]", *(extra or []), src],
+                             capture_output=True, text=True, check=True).stdout.strip().splitlines()
+        title, url = out[0], out[-1]
+        playlist = subprocess.run(["curl", "-sSfL", "--retry", "5", url], capture_output=True,
+                                  text=True, check=True).stdout
+    except (subprocess.CalledProcessError, IndexError) as e:
+        print(f"  ! быстрый путь Twitch не сработал ({e}), качаю через yt-dlp")
+        return False
+    lines = playlist.splitlines()
+    frags, t, first = [], 0.0, None
+    for i, line in enumerate(lines):
+        if line.startswith("#EXTINF:") and i + 1 < len(lines):
+            d = float(line[8:].split(",")[0])
+            if t + d > start and (end is None or t < end):
+                if first is None:
+                    first = t
+                frags.append(urllib.parse.urljoin(url, lines[i + 1].strip()))
+            t += d
+    if not frags:
+        return False
+    tmp = pdir / "_fragments"
+    tmp.mkdir(exist_ok=True)
+    print(f"→ Twitch: {len(frags)} фрагментов HLS с {fmt_time(first)}, качаю параллельно")
+
+    def get(item):
+        n, u = item
+        out = tmp / f"{n:05d}.ts"
+        if not out.exists() or out.stat().st_size == 0:
+            subprocess.run(["curl", "-sSfL", "--retry", "5", "-o", str(out), u], check=True)
+        return out
+
+    try:
+        with cf.ThreadPoolExecutor(16) as ex:
+            parts = list(ex.map(get, enumerate(frags)))
+    except subprocess.CalledProcessError as e:
+        print(f"  ! фрагмент не скачался ({e}), качаю через yt-dlp")
+        shutil.rmtree(tmp, ignore_errors=True)
+        return False
+    lst = tmp / "list.txt"
+    lst.write_text("".join(f"file '{p.resolve()}'\n" for p in parts), encoding="utf-8")
+    run(["ffmpeg", "-nostdin", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst,
+         "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "+faststart", "-y", pdir / "source.mp4"])
+    shutil.rmtree(tmp, ignore_errors=True)
+    meta.update(offset=first, url=src, title=title)
+    print(f"  начало куска сдвинуто к границе фрагмента: {fmt_time(first)} (offset в meta.json)")
+    return True
 
 
 def _runs_text(runs) -> str:
