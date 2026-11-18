@@ -116,9 +116,11 @@ def inset_filter(insets: list[dict], sw: int, sh: int, W: int, H: int, src: str,
 
 def clip_segments(clip: dict) -> list[dict]:
     """Сегменты клипа. Элемент — [начало, конец] или словарь
-    {start, end, speed, zoom, focus: [x, y], subs, text, layout, cam, layouts, inset}.
+    {start, end, speed, zoom, focus: [x, y], subs, text, layout, cam, layouts, inset, video_at}.
     layout/cam/layouts — своя раскладка на сегмент (вебка переехала, сцена сменилась).
-    inset — увеличенный кусок кадра поверх раскладки (см. _insets)."""
+    inset — увеличенный кусок кадра поверх раскладки (см. _insets).
+    video_at — картинка берётся с этого места исходника, а звук и субтитры остаются из
+    [start, end]: реплика звучит на чёрном экране или в меню, а показать нужно игру."""
     raw = clip["segments"] if "segments" in clip else [[clip["start"], clip["end"]]]
     segs = []
     for r in raw:
@@ -144,6 +146,7 @@ def clip_segments(clip: dict) -> list[dict]:
             "cam": d.get("cam"),
             "layouts": d.get("layouts") if isinstance(d.get("layouts"), dict) else None,
             "insets": _insets(clip, d),
+            "video_at": parse_time(d["video_at"]) if d.get("video_at") is not None else None,
             "out": (b - a) / speed,
         })
     return segs
@@ -158,6 +161,13 @@ def snap_segments(segs: list[dict], fps: float, src_dur: float | None = None, ci
         if src_dur and g["b"] > src_dur + 0.05:
             print(f"  ! клип {cid}: сегмент до {fmt_time(g['b'])} обрезан по концу видео ({fmt_time(src_dur)})")
             g["b"] = src_dur
+        va = g.get("video_at")
+        if va is not None and src_dur:
+            if va >= src_dur:
+                die(f"клип {cid}: video_at {fmt_time(va)} за концом видео ({fmt_time(src_dur)})")
+            if va + (g["b"] - g["a"]) > src_dur + 0.05:
+                die(f"клип {cid}: video_at {fmt_time(va)} + длина сегмента выходят за конец видео "
+                    f"({fmt_time(src_dur)}): картинки не хватит, звук и видео разойдутся")
         n = max(1, round((g["b"] - g["a"]) / g["speed"] * fps))
         g["out"] = n / fps
         g["b"] = g["a"] + g["out"] * g["speed"]
@@ -283,11 +293,23 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
     has_a = info["has_audio"] and not preview_png
     # каждый сегмент — отдельный вход с быстрой перемоткой: не держим в памяти видео между кусками
     inputs, parts, concat_in = [], [], []
+    n_in = 0   # номер следующего входа ffmpeg: у сегмента с video_at их два (звук и картинка)
     for i, g in enumerate(segs):
         a, b, sp, z = g["a"], g["b"], g["speed"], g["zoom"]
         # +0.2 с запаса на входе: точную длину отрезают trim/atrim ниже
-        inputs += ["-ss", f"{a:.3f}", "-t", f"{b - a + 0.2:.3f}", "-i", src.resolve()]
-        vf = f"[{i}:v]"
+        seg_in = ["-t", f"{b - a + 0.2:.3f}", "-i", src.resolve()]
+        ai = vi = n_in
+        if g["video_at"] is None:
+            inputs += ["-ss", f"{a:.3f}", *seg_in]
+            n_in += 1
+        else:
+            if has_a:   # звук из [start, end], картинка — со своего места исходника
+                inputs += ["-ss", f"{a:.3f}", *seg_in]
+                n_in += 1
+                vi = n_in
+            inputs += ["-ss", f"{g['video_at']:.3f}", *seg_in]
+            n_in += 1
+        vf = f"[{vi}:v]"
         if z > 1.0:  # резкий зум на сегмент (jump-zoom), focus — центр в долях кадра
             fx, fy = g["focus"]
             cw, ch = _even(sw / z), _even(sh / z)
@@ -311,7 +333,7 @@ def render_clip(cfg: dict, pdir: Path, clip: dict, out_dir: Path, preview_png: b
             parts.append(layout_filter(g_layout, g_lcfg, sw, sh, W, H, f"[v{i}]", f"[l{i}]", f"_{i}"))
         concat_in.append(f"[l{i}]")
         if has_a:
-            af = f"[{i}:a]asetpts=PTS-STARTPTS"
+            af = f"[{ai}:a]asetpts=PTS-STARTPTS"
             if sp != 1.0:
                 af += "," + _atempo(sp)
             af += f",aresample=48000,atrim=duration={g['out']:.5f},asetpts=PTS-STARTPTS"

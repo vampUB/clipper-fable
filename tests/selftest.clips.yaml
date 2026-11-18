@@ -47,3 +47,4 @@ clips:
     output: {progress_bar: true}
     segments:
       - [110.0, 123.0]
+      - {start: 123.0, end: 125.0, video_at: 20.0}   # звук отсюда, картинка с 20-й секунды исходника
