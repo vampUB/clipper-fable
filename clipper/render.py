@@ -174,6 +174,18 @@ def snap_segments(segs: list[dict], fps: float, src_dur: float | None = None, ci
     return segs
 
 
+def _tighten(w: dict) -> dict:
+    """large-v3 часто тянет начало слова к концу предыдущего, через всю паузу («ну» на 1.8 с).
+    Тогда середина слова уезжает в паузу: слово выпадает из сегмента, который начинается
+    перед ним, а подсветка загорается раньше голоса. Слово не звучит дольше, чем позволяет
+    его длина, — сдвигаем начало к концу."""
+    letters = sum(ch.isalnum() for ch in w["word"])
+    cap = 0.25 + 0.09 * letters
+    if w["end"] - w["start"] > cap:
+        return {**w, "start": round(w["end"] - cap, 2)}
+    return w
+
+
 def clip_words(ccfg: dict, pdir: Path, clip: dict, segs: list[dict], fake_words: list | None = None) -> list[dict]:
     """Слова клипа с временем в таймлайне клипа. У каждого слова seg — номер сегмента,
     src — время в исходнике (для subs_skip и отчёта check)."""
@@ -192,11 +204,11 @@ def clip_words(ccfg: dict, pdir: Path, clip: dict, segs: list[dict], fake_words:
         for x, y in spans:
             span_words += words_in_range(ccfg, pdir, round(max(0.0, x - 5), 1), round(y + 5, 1))
     words, off = [], 0.0
+    raw_all = [_tighten(w) for w in (fake_words if fake_words is not None else span_words)]
     for i, g in enumerate(segs):
         a, b, sp = g["a"], g["b"], g["speed"]
         if g["subs"]:
-            raw = fake_words if fake_words is not None else span_words
-            for w in raw:
+            for w in raw_all:
                 mid = (w["start"] + w["end"]) / 2
                 if any(x <= mid < y for x, y in skip):
                     continue

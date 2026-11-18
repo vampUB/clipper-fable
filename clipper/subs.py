@@ -79,7 +79,19 @@ def apply_replace(words: list[dict], replace: dict | None) -> list[dict]:
                     continue
                 tail = re.search(r"[?!]+$", words[i + n - 1]["word"].strip())
                 text = val + (tail.group(0) if tail and val and not re.search(r"[?!]$", val) else "")
-                if text:
+                parts = text.split()
+                if len(parts) > 1:
+                    # фраза из нескольких слов — отдельными словами, время делим по длине слов:
+                    # одно «слово» на всю фразу не переносится и вылезает за край кадра
+                    a, b = words[i]["start"], words[i + n - 1]["end"]
+                    total = sum(len(p) + 1 for p in parts)
+                    t = a
+                    for p in parts:
+                        d = (b - a) * (len(p) + 1) / total
+                        out.append({**words[i], "word": p, "start": round(t, 3),
+                                    "end": round(t + d, 3), "fixed": True})
+                        t += d
+                elif text:
                     out.append({**words[i], "word": text, "end": words[i + n - 1]["end"], "fixed": True})
                 i += n
                 break
