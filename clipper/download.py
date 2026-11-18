@@ -4,6 +4,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .util import die, fmt_time, parse_time, probe, project_dir, read_json, run, write_json
@@ -69,7 +70,17 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
                 p.unlink()
             hls = (f"b[protocol^=m3u8][height<={max_height}]"
                    f"/bv*[protocol^=m3u8][height<={max_height}]+ba")
-            run([hls if c == fmt else c for c in cmd])
+            # m3u8-форматы YouTube отдаёт не на каждый запрос (после 429/403 на странице
+            # список бывает без них → «Requested format is not available»). Повторяем.
+            for attempt in range(4):
+                try:
+                    run([hls if c == fmt else c for c in cmd])
+                    break
+                except subprocess.CalledProcessError:
+                    if attempt == 3:
+                        raise
+                    print(f"→ HLS не отдали, повтор {attempt + 2}/4 через 20 с")
+                    time.sleep(20)
         info_p = pdir / "source.info.json"
         if info_p.exists():
             info = read_json(info_p)
