@@ -75,8 +75,13 @@ def check_clip(cfg: dict, pdir: Path, clip: dict, src_words: list[dict] | None, 
         warn.append(f"длина {total:.1f} с — короче {lim['min_len']} с: клип не обрезан? добавь, что было до "
                     f"(повод, расклад), реакцию после, второй бит той же темы из другой части видео — "
                     f"короткий клип только если добавить правда нечего")
+    elif total > lim["max_len"] + 10:
+        warn.append(f"длина {total:.1f} с — сильно длиннее {lim['max_len']} с: перебор (отзыв goffren-ns). "
+                    f"Ужми до {lim['max_len']} с и ниже или раздели на два самостоятельных клипа; "
+                    f"длиннее — только если иначе не набрать клипов на ТЗ")
     elif total > lim["max_len"]:
-        warn.append(f"длина {total:.1f} с — длиннее {lim['max_len']} с: держит ли внимание всю длину?")
+        warn.append(f"длина {total:.1f} с — длиннее {lim['max_len']} с: держит ли внимание всю длину? "
+                    f"лучшая зона — 30–40 с")
 
     # --- история одной фразой
     story = str(clip.get("story") or "")
