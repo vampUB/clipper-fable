@@ -37,6 +37,9 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
                   src: str = "[vc]", dst: str = "[lay]", tag: str = "") -> str:
     """Цепочка фильтров src -> dst. tag — суффикс внутренних меток (раскладка на каждый сегмент)."""
     t = tag
+    # eq — подтянуть яркость/контраст тёмной картинки (вебка в тёмной комнате), напр.
+    # "brightness=0.06:contrast=1.15:gamma=1.6"; фон blur не трогаем
+    eq = f",eq={lcfg['eq']}" if lcfg.get("eq") else ""
     if name == "stream":
         top = _even(lcfg["top_height"])
         cw, ch, cx, cy = fit_rect(lcfg["cam"], sw, sh, W, top)
@@ -54,9 +57,9 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
         if lcfg.get("height"):  # крупнее: масштаб по высоте, края по бокам обрезаются
             fx = min(1.0, max(0.0, float(lcfg.get("focus_x", 0.5))))  # куда смотреть, если герой не в центре
             fg = (f"[s2{t}]crop=iw/{z}:ih/{z},scale=-2:{_even(lcfg['height'])}:flags=lanczos,"
-                  f"crop='min(iw,{W})':ih:'(iw-ow)*{fx:.3f}':0,setsar=1[fg{t}];")
+                  f"crop='min(iw,{W})':ih:'(iw-ow)*{fx:.3f}':0{eq},setsar=1[fg{t}];")
         else:
-            fg = f"[s2{t}]crop=iw/{z}:ih/{z},scale={W}:-2:flags=lanczos,setsar=1[fg{t}];"
+            fg = f"[s2{t}]crop=iw/{z}:ih/{z},scale={W}:-2:flags=lanczos{eq},setsar=1[fg{t}];"
         return (f"{src}split=2[s1{t}][s2{t}];"
                 f"[s1{t}]scale={sw4}:{sh4}:force_original_aspect_ratio=increase,crop={sw4}:{sh4},"
                 f"boxblur={b}:2,scale={W}:{H},eq=brightness={-d:.2f},setsar=1[bg{t}];"
@@ -64,7 +67,7 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
                 f"[bg{t}][fg{t}]overlay=(W-w)/2:(H-h)/2+{yo}{dst}")
     if name == "crop":
         w, h, x, y = fit_rect(lcfg.get("rect", [0, 0, 1, 1]), sw, sh, W, H, lcfg.get("focus_x", 0.5))
-        return f"{src}crop={w}:{h}:{x}:{y},scale={W}:{H}:flags=lanczos,setsar=1{dst}"
+        return f"{src}crop={w}:{h}:{x}:{y},scale={W}:{H}:flags=lanczos{eq},setsar=1{dst}"
     die(f"неизвестная раскладка {name!r} (есть: stream, blur, crop)")
 
 
