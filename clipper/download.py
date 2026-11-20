@@ -51,6 +51,10 @@ def fetch(cfg: dict, src: str, name: str | None, max_height: int, start=None, en
         # yt-dlp по умолчанию включает только deno; если его нет — подсунуть node
         if not shutil.which("deno") and shutil.which("node"):
             cmd += ["--js-runtimes", f"node:{shutil.which('node')}"]
+        # решатель n-challenge YouTube (EJS) не входит в pip-пакет yt-dlp: без него остаются
+        # только картинки («Requested format is not available»)
+        if "youtu" in src:
+            cmd += ["--remote-components", "ejs:github"]
         if cookies:
             cmd += ["--cookies", cookies]
         if not no_chat and "twitch.tv" not in src:
