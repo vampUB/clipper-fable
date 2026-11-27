@@ -52,13 +52,24 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
         d = float(lcfg.get("darken", 0.35))
         b = max(1, int(lcfg.get("blur", 30)) // 4)
         sw4, sh4 = _even(W / 4), _even(H / 4)
+        if lcfg.get("cam_w"):  # вебка окном: ширина cam_w, пропорции как у прямоугольника cam
+            cwp = _even(lcfg["cam_w"])
+            rx, ry, rw, rh = lcfg["cam"]
+            chp = _even(cwp * (rh * sh) / (rw * sw))
+            cpx, cpy = lcfg.get("cam_pos", [(W - cwp) // 2, 0])
+            cam_chain = (f"[s2{t}]crop={_even(rw * sw)}:{_even(rh * sh)}:{int(rx * sw)}:{int(ry * sh)},"
+                         f"scale={cwp}:{chp}:flags=lanczos,setsar=1[cam{t}];")
+            cam_xy = f"{int(cpx)}:{int(cpy)}"
+        else:
+            cam_chain = f"[s2{t}]crop={cw}:{ch}:{cx}:{cy},scale={W}:{top}:flags=lanczos,setsar=1[cam{t}];"
+            cam_xy = "0:0"
         return (f"{src}split=3[s1{t}][s2{t}][s3{t}];"
                 f"[s1{t}]scale={sw4}:{sh4}:force_original_aspect_ratio=increase,crop={sw4}:{sh4},"
                 f"boxblur={b}:2,scale={W}:{H},eq=brightness={-d:.2f},setsar=1[bg{t}];"
-                f"[s2{t}]crop={cw}:{ch}:{cx}:{cy},scale={W}:{top}:flags=lanczos,setsar=1[cam{t}];"
+                + cam_chain +
                 f"[s3{t}]crop={gcw}:{gch}:{gcx}:{gcy},scale=-2:{gh_}:flags=lanczos,"
                 f"crop='min(iw,{W})':ih:'(iw-ow)*{fx:.3f}':0,setsar=1[game{t}];"
-                f"[bg{t}][cam{t}]overlay=0:0[bc{t}];"
+                f"[bg{t}][cam{t}]overlay={cam_xy}[bc{t}];"
                 f"[bc{t}][game{t}]overlay=(W-w)/2:{gy_}{dst}")
     if name == "stream":
         top = _even(lcfg["top_height"])
