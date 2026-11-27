@@ -1,19 +1,22 @@
 # cs-aunkere-battle: сборник твич-клипов по CS2 (канал Say CS2 Clips, 18.08.2025).
 # Главная нить — BetBoom Streamers Battle 3, команда Aunkere (капитан Aunkere = Женя, Nix = Саша,
 # FL4MUS, yariksupra, risenHAHA). 14.08, первая карта против Hooch team (Mirage).
-# Вебки у всех разные, нарезчик сам увеличивает вебку на реакциях -> blur 860 у всех клипов.
+# Вебки у всех разные: в POV маленькая вебка -> stream (cam размечен по сетке на каждый кусок),
+# где нарезчик увеличил вебку -> crop на лицо, без вебки (матч, меню, килфид) -> blur 860.
 defaults:
   layouts:
     blur:
       height: 860
+    stream:
+      top_height: 700
   title:
     duration: 3.5
     uppercase: false
-    y: 430
+    y: 700
   whisper:
     clip_model: large-v3
   subs:
-    y: 1530
+    y: 1480
     replace:
       женек: Женёк
       "1700 л": "1700 эло"
@@ -22,6 +25,9 @@ defaults:
       карату: Карату
       "запушил б": "запушил Б"
       каратик: Каратик
+      сензу: Сензу
+      сэнсу: Сензу
+      баркрафт: Варкрафт
 
 clips:
   - id: 01-spor
@@ -31,16 +37,17 @@ clips:
     title_alt: ["один соло на четверых", "ищут виноватого с первого раунда"]
     desc: "Nix / Никс и Aunkere на BetBoom Streamers Battle. кто тут прав, по-вашему?"
     tags: [cs2, кс2, nix, никс, aunkere]
-    layout: blur
-    layouts: {blur: {focus_x: 0.3}}
+    layout: crop
+    layouts: {crop: {focus_x: 0.25}}     # крупная вебка Nix (нарезчик увеличил), лицо по центру
+    title_style: {y: 330}
     segments:
-      # проигранная пистолетка глазами Nix, кто-то разбирает раунд
-      - {start: 145.15, end: 149.3, layouts: {blur: {focus_x: 0.5}}}
+      # проигранная пистолетка, Nix смотрит табло; кто-то разбирает раунд
+      - {start: 145.15, end: 149.3}
       - {start: 149.3, end: 154.9, who: "Nix"}
       - {start: 154.9, end: 156.15, who: "Aunkere"}
       - {start: 156.15, end: 160.4, who: "Nix"}
       # тот же раунд глазами Solo: четыре убийства с USP, килфид крупно
-      - {start: 164.0, end: 175.0, subs: false, layouts: {blur: {focus_x: 0.5}},
+      - {start: 164.0, end: 175.0, subs: false, layout: blur,
          inset: {rect: [0.70, 0.07, 0.30, 0.10], width: 760, at: [540, 300]}}
       - {start: 203.1, end: 208.8, who: "Aunkere"}
       - {start: 208.8, end: 234.5, who: "Nix"}
@@ -53,19 +60,20 @@ clips:
     title_alt: ["играю ради удовольствия", "удовольствие от игры получено"]
     desc: "Nix / Никс на BetBoom Streamers Battle по CS2. знакомо, когда от тебя ждут больше твоего эло?"
     tags: [cs2, кс2, nix, никс, streamersbattle]
-    layout: blur
-    layouts: {blur: {focus_x: 0.6}}
+    layout: stream
+    title_style: {y: 330}
     segments:
-      # лицо Nix (4:48) под первую реплику, потом проигранный раунд, потом его же игра в этом матче
-      # (под монологом в исходнике меню CS: игра переподключается)
-      - {start: 407.25, end: 408.5, video_at: 287.9, layouts: {blur: {focus_x: 0.3}}}
-      - {start: 408.55, end: 409.45, video_at: 289.2, who: "Nix", layouts: {blur: {focus_x: 0.3}}}
-      - {start: 412.35, end: 418.95, layouts: {blur: {focus_x: 0.5}}}
-      - {start: 419.0, end: 426.5, video_at: 318.4}
-      - {start: 426.6, end: 439.55, video_at: 325.2}
-      - {start: 439.55, end: 440.85, layouts: {blur: {focus_x: 0.5}}}
-      - {start: 441.0, end: 448.0, video_at: 184.4}
-      - {start: 448.0, end: 458.15, layouts: {blur: {focus_x: 0.5}}}
+      # лицо Nix (4:48) под первую реплику, потом проигранный раунд (чёрный экран с баннером),
+      # потом его же игра в этом матче (под монологом в исходнике меню CS: игра переподключается)
+      - {start: 407.25, end: 408.5, video_at: 287.9, layout: crop, layouts: {crop: {focus_x: 0.3}}}
+      - {start: 408.55, end: 409.45, video_at: 289.2, who: "Nix", layout: crop, layouts: {crop: {focus_x: 0.3}}}
+      - {start: 412.35, end: 418.95, layout: blur}
+      - {start: 419.0, end: 426.5, video_at: 318.4, cam: [0.0, 0.31, 0.215, 0.215]}
+      - {start: 426.6, end: 439.55, video_at: 325.2, cam: [0.0, 0.31, 0.215, 0.215]}
+      - {start: 439.55, end: 440.85, layout: blur}
+      - {start: 441.0, end: 448.0, video_at: 184.4, cam: [0.0, 0.345, 0.218, 0.215]}
+      - {start: 448.0, end: 450.9, layout: blur}
+      - {start: 450.95, end: 458.15, video_at: 126.4, cam: [0.0, 0.345, 0.218, 0.215]}
 
   - id: 03-karat
     format: момент → реакция (клатч под коллы)
@@ -74,10 +82,191 @@ clips:
     title_alt: ["лучший брат в клатче", "дегстер нашёл батю"]
     desc: "degster и Karat22. какой коллер нужен тебе в клатче?"
     tags: [cs2, кс2, degster, клатч]
-    layout: blur
-    layouts: {blur: {focus_x: 0.4}}
+    layout: stream
     subs_skip:                       # модели расходятся: «в идее» / «где», «Лучший!» / «Вау, чей!»
       - [395.5, 395.9]
       - [401.1, 401.8]
     segments:
-      - {start: 378.5, end: 406.7, who: "degster"}
+      - {start: 378.5, end: 384.9, who: "degster", cam: [0.0, 0.383, 0.218, 0.217]}
+      - {start: 384.9, end: 400.85, cam: [0.0, 0.385, 0.177, 0.215]}
+      # реакция degster: нарезчик увеличил вебку -> лицо крупно
+      - {start: 400.85, end: 406.7, layout: crop, layouts: {crop: {focus_x: 0.4}}}
+
+  - id: 04-flamus
+    format: момент → реакция
+    story: "клип о том, как мёртвый Nix наблюдает за FL4MUS, который с Глоком по одному снимает Dosia, starsallor и Solo, и в итоге Nix орёт на весь стрим"
+    title: "фламус вывез с пистолета"
+    title_alt: ["никс орёт за фламуса", "три с пистолета"]
+    desc: "Nix / Никс и FL4MUS на BetBoom Streamers Battle. кто тут MVP?"
+    tags: [cs2, кс2, nix, никс, fl4mus]
+    layout: stream
+    subs_skip:
+      - [318.0, 318.5]
+      - [329.0, 332.0]     # неразборчиво
+      - [333.0, 339.5]     # крик без слов
+    segments:
+      - {start: 318.55, end: 338.15, cam: [0.0, 0.31, 0.215, 0.215],
+         inset: {rect: [0.74, 0.06, 0.26, 0.09], width: 720, at: [540, 830], from: 3.5}}
+      - {start: 338.17, end: 341.75, who: "Nix", layout: crop, layouts: {crop: {focus_x: 0.35}}}
+
+  - id: 05-puli
+    format: хайлайт + нытьё (сетап → развязка)
+    story: "клип о том, как m3wsu из By Owl team по одному снимает Aunkere, Nix и yariksupra и ставит бомбу, Nix жалуется, что смирился, пули не летят и лагает комп, а в итоге m3wsu снова убивает Nix под «Хорош, Миша!»"
+    title: "у никса пули не летят"
+    title_alt: ["никс смирился", "миша против команды аункера"]
+    desc: "Nix / Никс, Aunkere и m3wsu (By Owl team) на BetBoom Streamers Battle. лаги или скилл?"
+    tags: [cs2, кс2, nix, никс, aunkere]
+    layout: stream
+    subs_skip:
+      - [43.5, 44.6]
+      - [290.0, 293.5]     # «аниме аватарка поставился» — смысл непонятен
+      - [311.7, 314.55]    # неразборчивые коллы
+    segments:
+      - {start: 29.75, end: 54.5, cam: [0.0, 0.37, 0.18, 0.21],
+         inset: {rect: [0.68, 0.04, 0.32, 0.10], width: 720, at: [540, 830], from: 6.0}}
+      - {start: 287.45, end: 291.85, video_at: 287.75, who: "Nix", layout: crop, layouts: {crop: {focus_x: 0.3}}}
+      - {start: 291.85, end: 296.25, layout: crop, layouts: {crop: {focus_x: 0.3}}}
+      - {start: 296.25, end: 298.2, cam: [0.0, 0.39, 0.27, 0.27]}
+      - {start: 312.0, end: 315.85, cam: [0.0, 0.37, 0.18, 0.21]}
+      - {start: 315.87, end: 317.25, layout: crop, layouts: {crop: {focus_x: 0.16}}}
+
+  - id: 06-gruzovik
+    format: фейл (короткий кусок как есть)
+    story: "клип о том, как Lixxx командует Диману прыгать в окно и кидает молотов в машину, а в итоге сам умирает и закрывает лицо руками"
+    title: "план ликса не сработал"
+    title_alt: ["диман прыгай в окно", "молик в тачку"]
+    desc: "Lixxx / Ликс на BetBoom Streamers Battle. что пошло не так?"
+    tags: [cs2, кс2, lixxx, ликс]
+    layout: stream
+    segments:
+      - {start: 0.0, end: 9.15, video_at: 0.3, who: "Lixxx", cam: [0.0, 0.0, 0.275, 0.27]}
+      - {start: 9.15, end: 11.1, layout: crop, layouts: {crop: {focus_x: 0.18}}}
+
+  - id: 07-baz
+    format: хайлайт (короткий)
+    story: "клип о том, как baz1221 с 8 хп держит плент с AWP, убивает через смок, и в итоге орёт от радости"
+    title: "авп через смок на 8 хп"
+    title_alt: ["8 хп хватило", "держал плент на 8 хп"]
+    desc: "baz1221. кто бы сыграл так же?"
+    tags: [cs2, кс2, awp, клатч]
+    layout: stream
+    subs_skip:
+      - [11.9, 18.5]       # галлюцинация whisper на игровом звуке
+      - [23.5, 24.3]
+    segments:
+      - {start: 12.25, end: 19.55, cam: [0.0, 0.0, 0.2, 0.245]}
+      - {start: 19.6, end: 23.4, layout: crop, layouts: {crop: {focus_x: 0.33}}}
+
+  - id: 08-strogo
+    format: суперкат
+    story: "клип о том, как strogo с надписью «avg сейчас 12, иду к 20 avg» кидает фишечный смок, жалуется и просит молик, а в итоге встаёт и уходит от компа"
+    title: "строго идёт к 20 avg"
+    title_alt: ["путь к 20 avg", "avg 13 и ни шагу назад"]
+    desc: "strogo / строго. сколько ещё до 20 avg?"
+    tags: [cs2, кс2, strogo, строго]
+    layout: stream
+    subs_skip:
+      - [23.5, 25.2]       # «молли» из куска baz1221
+      - [275.5, 278.2]     # неразборчиво
+      - [279.0, 281.0]
+      - [471.0, 472.5]
+    segments:
+      - {start: 24.6, end: 26.9, cam: [0.0, 0.0, 0.3, 0.34]}
+      - {start: 26.9, end: 29.55, layout: crop, layouts: {crop: {focus_x: 0.31}},
+         inset: {rect: [0.0, 0.84, 0.32, 0.16], width: 700, at: [540, 250]}}
+      - {start: 272.3, end: 276.2, cam: [0.0, 0.0, 0.3, 0.34]}
+      - {start: 276.2, end: 281.0, layout: crop, layouts: {crop: {focus_x: 0.21}},
+         inset: {rect: [0.0, 0.76, 0.27, 0.24], width: 600, at: [540, 260]}}
+      - {start: 281.0, end: 286.0, cam: [0.0, 0.0, 0.3, 0.34]}
+      - {start: 470.4, end: 475.8, cam: [0.0, 0.0, 0.3, 0.34]}
+      - {start: 475.8, end: 479.5, layout: crop, layouts: {crop: {focus_x: 0.38}}}
+      - {start: 480.25, end: 487.9, layout: crop, layouts: {crop: {focus_x: 0.25}},
+         inset: {rect: [0.0, 0.84, 0.32, 0.16], width: 700, at: [540, 250]}}
+
+  - id: 09-dangerlyoha
+    format: реакция на матч (комментарий + пляска)
+    story: "клип о том, как dangerlyoha комментирует раунд финала Spirit против The MongolZ, sh1ro снимает двоих, но bLitz добивает chopper и sh1ro, и в итоге Лёха вскакивает и пляшет"
+    title: "блиц вывез лёха в пляс"
+    title_alt: ["лёха прыгает на весь стрим", "раунд за монголов"]
+    desc: "dangerlyoha / Лёха смотрит финал BLAST Bounty. за кого болел бы ты?"
+    tags: [cs2, кс2, dangerlyoha, mongolz, spirit]
+    layout: stream
+    subs_skip:
+      - [71.3, 71.9]
+      - [79.1, 81.6]
+      - [83.0, 84.0]
+      - [90.5, 91.6]
+      - [101.0, 102.6]
+    segments:
+      - {start: 69.05, end: 95.25, video_at: 69.3, who: "dangerlyoha", cam: [0.0, 0.39, 0.245, 0.25]}
+      - {start: 95.28, end: 103.0, layout: crop, layouts: {crop: {focus_x: 0.25}}}
+
+  - id: 10-stavki
+    format: сетап → развязка (ставки стримеров)
+    story: "клип о том, как mokrivskiy ставит 300к на Spirit 3:1 и успокаивает чат «это только первая карта», recrent ставит 20к на 3:0, mokrivskiy хохочет, а в итоге финал заканчивается 3:0 и ставка mokrivskiy не заходит"
+    title: "стримеры поставили на спирит"
+    title_alt: ["300к на спирит 3 1", "чья ставка зашла"]
+    desc: "mokrivskiy и recrent на финале BLAST Bounty Season 2, Spirit против The MongolZ. а ты на что ставил?"
+    tags: [cs2, кс2, mokrivskiy, recrent, spirit]
+    layout: stream
+    subs_skip:
+      - [496.2, 496.8]
+      - [509.5, 512.0]
+    segments:
+      - {start: 60.5, end: 63.0, video_at: 60.8, who: "mokrivskiy", cam: [0.0, 0.39, 0.19, 0.22]}
+      - {start: 67.6, end: 68.15, cam: [0.0, 0.39, 0.19, 0.22]}
+      - {start: 68.2, end: 69.0, cam: [0.0, 0.25, 0.5, 0.55]}
+      - {start: 488.95, end: 497.6, who: "recrent", cam: [0.0, 0.355, 0.21, 0.245]}
+      - {start: 501.9, end: 506.9, cam: [0.0, 0.33, 0.55, 0.6]}
+      - {start: 507.0, end: 510.5, cam: [0.0, 0.39, 0.19, 0.22]}
+      - {start: 510.55, end: 515.15, cam: [0.0, 0.3, 0.62, 0.68], text: "финал 3:0 Spirit"}
+
+  - id: 11-seed-evelone
+    format: сетап → развязка (два стримера)
+    story: "клип о том, как seed_tv обижается, что Эвелон не зовёт его бухать, а у Эвелона в это время падает сервер, он открывает бутылку, пьёт, возвращается в игру, и в итоге смеётся «на секунду больше бы поверил, уже попался»"
+    title: "сид обиделся на эвелона"
+    title_alt: ["сида не позвали", "эвелон отдыхает без сида"]
+    desc: "seed_tv / сид и evelone / эвелон. позвал бы сида?"
+    tags: [cs2, кс2, evelone, эвелон, seed]
+    layout: crop
+    title_style: {y: 330}
+    segments:
+      - {start: 342.6, end: 352.35, who: "seed_tv", layouts: {crop: {focus_x: 0.38}}}
+      - {start: 237.0, end: 252.4, video_at: 237.25, who: "evelone", layouts: {crop: {focus_x: 0.13}}}
+      - {start: 252.4, end: 259.0, layout: stream, cam: [0.0, 0.31, 0.26, 0.29]}
+      - {start: 259.0, end: 262.6, layout: stream, cam: [0.0, 0.3, 0.26, 0.26]}
+      - {start: 262.6, end: 272.25, layouts: {crop: {focus_x: 0.23}}}
+
+  - id: 12-peticiya
+    format: цельный отрезок (оффтоп)
+    story: "клип о том, как у rostikfacekid во время финала с его ставкой на монголов обсуждают петицию, где подписей за ночь стало полторы тысячи, мечтают, что Глеб пойдёт в президенты, и в итоге все «осуждают»"
+    title: "глеб президент россии"
+    title_alt: ["подписали петицию", "полторы тысячи подписей за ночь"]
+    desc: "rostikfacekid / ростик. подписал бы?"
+    tags: [cs2, кс2, rostikfacekid]
+    layout: stream
+    segments:
+      - {start: 529.15, end: 537.6, video_at: 529.75, cam: [0.0, 0.43, 0.2, 0.22]}
+      - {start: 539.6, end: 542.1, cam: [0.0, 0.43, 0.2, 0.22]}
+      - {start: 543.9, end: 547.1, cam: [0.0, 0.43, 0.2, 0.22]}
+      - {start: 547.12, end: 549.47, cam: [0.0, 0.32, 0.52, 0.54]}
+      - {start: 549.5, end: 555.42, cam: [0.0, 0.43, 0.2, 0.22]}
+      - {start: 555.45, end: 557.15, cam: [0.0, 0.32, 0.52, 0.54]}
+      - {start: 557.2, end: 559.5, cam: [0.0, 0.43, 0.2, 0.22]}
+      - {start: 562.5, end: 570.15, cam: [0.0, 0.32, 0.52, 0.54]}
+
+  - id: 13-seredina
+    format: цельный отрезок (диалог)
+    story: "клип о том, как в войсе Hooch team Лёху учат упасть в середину, Лёха падает не туда и в итоге «это сложно, забей»"
+    title: "лёха не нашёл середину"
+    title_alt: ["середина это сложно", "это сложно забей"]
+    desc: "войс Hooch team глазами Solo. где тут середина?"
+    tags: [cs2, кс2, solo, hooch]
+    layout: blur
+    title_style: {y: 430}
+    subs_skip:
+      - [521.75, 522.9]
+    segments:
+      - {start: 515.95, end: 521.85}
+      - {start: 523.65, end: 528.75}
+
