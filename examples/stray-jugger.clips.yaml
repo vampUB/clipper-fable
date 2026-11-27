@@ -6,18 +6,23 @@ defaults:
   layout: stream
   layouts:
     stream:
-      top_height: 640
+      top_height: 540
       cam: [0.0, 0.74, 0.195, 0.26]
-      game: [0.12, 0.06, 0.76, 0.84]
+      game: [0.1, 0.0, 0.9, 1.0]
+      game_height: 860
+      game_y: 540
       game_focus_x: 0.5
     blur:
       height: 860
   title:
     duration: 3.5
     uppercase: false
+    y: 540
   whisper:
     clip_model: large-v3
   subs:
+    y: 1515
+    who_y: 1438
     replace:
       джагер: Джаггер
       джагере: Джаггере
