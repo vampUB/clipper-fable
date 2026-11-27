@@ -37,6 +37,29 @@ def layout_filter(name: str, lcfg: dict, sw: int, sh: int, W: int, H: int,
                   src: str = "[vc]", dst: str = "[lay]", tag: str = "") -> str:
     """Цепочка фильтров src -> dst. tag — суффикс внутренних меток (раскладка на каждый сегмент)."""
     t = tag
+    if name == "stream" and lcfg.get("game_height"):
+        # Вебка сверху + игра как в blur: кадр игры по высоте game_height (края по бокам
+        # обрезаются по game_focus_x), всё на размытом фоне. Не режет HUD и скиллы, как узкая
+        # вертикальная вырезка обычного stream.
+        top = _even(lcfg["top_height"])
+        gh_ = _even(lcfg["game_height"])
+        gy_ = int(lcfg.get("game_y", top))
+        cw, ch, cx, cy = fit_rect(lcfg["cam"], sw, sh, W, top)
+        gx_, gy0, gw0, gh0 = lcfg.get("game", [0, 0, 1, 1])
+        gcw, gch = _even(gw0 * sw), _even(gh0 * sh)
+        gcx, gcy = int(gx_ * sw), int(gy0 * sh)
+        fx = min(1.0, max(0.0, float(lcfg.get("game_focus_x", 0.5))))
+        d = float(lcfg.get("darken", 0.35))
+        b = max(1, int(lcfg.get("blur", 30)) // 4)
+        sw4, sh4 = _even(W / 4), _even(H / 4)
+        return (f"{src}split=3[s1{t}][s2{t}][s3{t}];"
+                f"[s1{t}]scale={sw4}:{sh4}:force_original_aspect_ratio=increase,crop={sw4}:{sh4},"
+                f"boxblur={b}:2,scale={W}:{H},eq=brightness={-d:.2f},setsar=1[bg{t}];"
+                f"[s2{t}]crop={cw}:{ch}:{cx}:{cy},scale={W}:{top}:flags=lanczos,setsar=1[cam{t}];"
+                f"[s3{t}]crop={gcw}:{gch}:{gcx}:{gcy},scale=-2:{gh_}:flags=lanczos,"
+                f"crop='min(iw,{W})':ih:'(iw-ow)*{fx:.3f}':0,setsar=1[game{t}];"
+                f"[bg{t}][cam{t}]overlay=0:0[bc{t}];"
+                f"[bc{t}][game{t}]overlay=(W-w)/2:{gy_}{dst}")
     if name == "stream":
         top = _even(lcfg["top_height"])
         cw, ch, cx, cy = fit_rect(lcfg["cam"], sw, sh, W, top)
